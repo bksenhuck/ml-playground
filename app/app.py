@@ -32,13 +32,12 @@ def serve_app() -> dash.Dash:
     # prepare dataset features for the features dropdown at layout creation
     import seaborn as sns
     _df = sns.load_dataset("titanic")
-    # Exclude the target and columns that directly encode or are fully derived from it
-    # (alive = "yes"/"no" for survived; class/who/adult_male/embark_town/alone are
-    # redundant with pclass/sex/age/embarked/sibsp+parch — keeping them risks data leakage)
-    _EXCLUDED = {"survived", "alive", "class", "who", "adult_male", "embark_town", "alone"}
+    # Only exclude the direct target ("survived") and its string alias ("alive")
+    # Let the user decide if they want to use redundant features (like 'class', 'who', 'alone')
+    _EXCLUDED = {"survived", "alive"}
     _features = [c for c in _df.columns if c not in _EXCLUDED]
     _feature_opts = [{"label": f, "value": f} for f in _features]
-    _feature_default = [f for f in ["age", "sex", "pclass"] if f in _features]
+    _feature_default = [f for f in ["age", "sex", "pclass", "fare", "embarked"] if f in _features]
 
     controls = dbc.Card(
         [
@@ -58,21 +57,46 @@ def serve_app() -> dash.Dash:
                         # ── Features ──────────────────────────────────────
                         dbc.AccordionItem(
                             [
-                                dbc.Label("Colunas", className="fw-semibold mb-1"),
-                                dcc.Dropdown(
-                                    id="feature-select",
-                                    multi=True,
-                                    options=_feature_opts,
-                                    value=_feature_default,
-                                    placeholder="Selecione features…",
-                                ),
-                                html.Hr(className="my-2"),
-                                dcc.Checklist(
-                                    id="poly-features",
-                                    options=[{"label": " Polynomial Features (grau 2)", "value": "enabled"}],
-                                    value=[],
-                                    inputStyle={"marginRight": "6px"},
-                                ),
+                                # Sub-seção: Seleção Principal
+                                html.Div([
+                                    dbc.Label("Seleção de Features", className="fw-bold small mb-1"),
+                                    dcc.Dropdown(
+                                        id="feature-select",
+                                        multi=True,
+                                        options=_feature_opts,
+                                        value=_feature_default,
+                                        placeholder="Selecione as features de entrada...",
+                                        style={"fontSize": "0.85rem"},
+                                    ),
+                                ], className="mb-3"),
+
+                                # Sub-seção: Ações Rápidas (Exclusão/Limpeza)
+                                html.Div([
+                                    dbc.Label("Limpeza e Filtros", className="fw-bold small mb-1"),
+                                    dbc.Row([
+                                        dbc.Col(
+                                            dbc.Button("Remover Redundantes", id="remove-redundant-btn", outline=True, color="secondary", size="sm", class_name="w-100", style={"fontSize": "0.7rem"}),
+                                            width=6,
+                                        ),
+                                        dbc.Col(
+                                            dbc.Button("Limpar Tudo", id="clear-features-btn", outline=True, color="danger", size="sm", class_name="w-100", style={"fontSize": "0.7rem"}),
+                                            width=6,
+                                        ),
+                                    ], className="g-1"),
+                                    html.Small("Remove colunas como 'alive', 'class', 'alone' que duplicam informação.", className="text-muted", style={"fontSize": "0.65rem", "display": "block", "marginTop": "4px"}),
+                                ], className="mb-3"),
+
+                                # Sub-seção: Engenharia / Adição
+                                html.Div([
+                                    dbc.Label("Transformações", className="fw-bold small mb-1"),
+                                    dcc.Checklist(
+                                        id="poly-features",
+                                        options=[{"label": " Adicionar Polynomial (grau 2)", "value": "enabled"}],
+                                        value=[],
+                                        inputStyle={"marginRight": "6px"},
+                                        style={"fontSize": "0.85rem"},
+                                    ),
+                                ]),
                             ],
                             title="Features",
                             item_id="features",
@@ -275,7 +299,7 @@ def serve_app() -> dash.Dash:
         dbc.Container(
             dbc.Row(
                 [
-                    dbc.Col(html.Small("© 2026 ML Playground. Built with Dash & MLflow.", className="text-muted")),
+                    dbc.Col(html.Small("© 2026 ML Playground. Built with Dash & Scikit-Learn.", className="text-muted")),
                     dbc.Col(
                         html.Div(
                             [
@@ -335,13 +359,13 @@ def serve_app() -> dash.Dash:
                 "color": "#27ae60",
             },
             {
-                "title": "Metricas",
+                "title": "Modelos",
                 "icon": None,
                 "desc": (
-                    "Visualize e compare metricas dos modelos treinados: "
+                    "Visualize e compare métricas dos modelos treinados: "
                     "accuracy, F1, ROC AUC, SHAP e muito mais."
                 ),
-                "href": "/experimentos",
+                "href": "/modelos",
                 "color": "#8e44ad",
             },
             {
@@ -756,6 +780,7 @@ def serve_app() -> dash.Dash:
                                             dbc.Row([
                                                 dbc.Col(dbc.Card(dbc.CardBody("Logistic Regression"), color="primary", outline=True, className="text-center mb-2")),
                                                 dbc.Col(dbc.Card(dbc.CardBody("Random Forest"), color="primary", outline=True, className="text-center mb-2")),
+                                                dbc.Col(dbc.Card(dbc.CardBody("XGBoost"), color="primary", outline=True, className="text-center mb-2")),
                                             ], className="mb-3"),
                                             html.H6("Métricas de Avaliação", className="text-primary fw-bold"),
                                             html.Div([
@@ -880,9 +905,15 @@ def serve_app() -> dash.Dash:
                 "C",
                 1.0,
                 "0.01 – 10.0",
-                "Inverso da força de regularização L2. C alto = menos regularização "
-                "(modelo mais flexível, risco de overfitting). "
-                "C baixo = mais regularização (modelo mais simples, risco de underfitting).",
+                "Inverso da força de regularização. C alto = menos regularização. "
+                "C baixo = mais regularização (modelo mais simples).",
+            ),
+            (
+                "penalty",
+                "l2",
+                "l1 (Lasso) ou l2 (Ridge)",
+                "Tipo de penalização aplicada. L1 pode zerar coeficientes (seleção de features), "
+                "enquanto L2 apenas os diminui.",
             ),
         ]
         rf_params = [
@@ -890,17 +921,21 @@ def serve_app() -> dash.Dash:
                 "n_estimators",
                 100,
                 "10 – 500",
-                "Número de árvores na floresta. Mais árvores = menor variância e melhor "
-                "generalização, mas custo computacional maior. Valores acima de 200 "
-                "raramente trazem ganhos significativos.",
+                "Número de árvores na floresta. Mais árvores costumam melhorar o modelo, "
+                "mas aumentam o tempo de treino.",
             ),
             (
                 "max_depth",
                 6,
                 "1 – 30",
-                "Profundidade máxima de cada árvore. Árvores mais rasas evitam overfitting; "
-                "árvores muito profundas memorizam o treino. None = sem limite (cresce "
-                "até folhas puras).",
+                "Profundidade máxima de cada árvore. Árvores muito profundas "
+                "podem causar overfitting.",
+            ),
+            (
+                "min_samples_split",
+                2,
+                "2 – 20",
+                "Número mínimo de amostras necessárias para dividir um nó interno.",
             ),
         ]
         xgb_params = [
@@ -908,24 +943,26 @@ def serve_app() -> dash.Dash:
                 "n_estimators",
                 100,
                 "10 – 500",
-                "Número de rounds de boosting (uma árvore por round). Quanto maior, "
-                "mais complexo o modelo — combine com learning_rate menor para "
-                "melhor generalização.",
+                "Número de rounds de boosting (árvores). Mais rounds aumentam a complexidade.",
             ),
             (
                 "max_depth",
                 6,
                 "1 – 12",
-                "Profundidade máxima de cada árvore base. Valores menores (3-6) "
-                "são preferíveis no XGBoost, pois o boosting corrige erros iterativamente.",
+                "Profundidade máxima das árvores. No boosting, profundidades menores (3-6) "
+                "são comuns.",
             ),
             (
                 "learning_rate",
                 0.1,
                 "0.01 – 0.5",
-                "Tamanho do passo de aprendizado (eta). Valores menores = aprendizado "
-                "mais lento mas mais robusto — compense aumentando n_estimators. "
-                "Regra prática: learning_rate × n_estimators ≈ constante.",
+                "Passo de aprendizado. Valores baixos exigem mais n_estimators.",
+            ),
+            (
+                "subsample",
+                1.0,
+                "0.5 – 1.0",
+                "Fração de amostras usadas para treinar cada árvore. Ajuda a evitar overfitting.",
             ),
         ]
 
@@ -1103,7 +1140,7 @@ def serve_app() -> dash.Dash:
                         dbc.Col(
                             dbc.Card(dbc.CardBody([
                                 html.H5("3. Rastreie", className="fw-bold"),
-                                html.P("Cada experimento é salvo no MLflow com parâmetros, métricas e o modelo treinado."),
+                                html.P("Cada experimento é registrado em memória com parâmetros, métricas e o modelo treinado."),
                             ]), style=step_card_style),
                             md=3, className="mb-3",
                         ),
@@ -1144,8 +1181,8 @@ def serve_app() -> dash.Dash:
                                         dbc.Col([
                                             html.H6("Rastreamento & Deploy", className="text-muted fw-bold"),
                                             dbc.ListGroup([
-                                                dbc.ListGroupItem("MLflow (experiment tracking)"),
-                                                dbc.ListGroupItem("SQLite (backend local)"),
+                                                dbc.ListGroupItem("In-memory Session Tracking"),
+                                                dbc.ListGroupItem("GCS / Cloud Run ready"),
                                                 dbc.ListGroupItem("Docker (containerização)"),
                                             ], flush=True),
                                         ], md=4),
@@ -1225,12 +1262,38 @@ def serve_app() -> dash.Dash:
         return welcome_layout()
 
     @app.callback(
-        Output("feature-select", "options"),
         Output("feature-select", "value"),
+        Input("remove-redundant-btn", "n_clicks"),
+        Input("clear-features-btn", "n_clicks"),
+        Input("feature-select", "id"),
+        State("feature-select", "value"),
+    )
+    def manage_features(remove_clicks, clear_clicks, _, current_features):
+        ctx = callback_context
+        if not ctx.triggered:
+            return _feature_default
+
+        triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+        if triggered_id == "feature-select":
+            return _feature_default
+
+        if triggered_id == "clear-features-btn":
+            return []
+
+        if triggered_id == "remove-redundant-btn":
+            redundant = {"alive", "class", "who", "adult_male", "embark_town", "alone"}
+            current = current_features or []
+            return [f for f in current if f not in redundant]
+
+        return no_update
+
+    @app.callback(
+        Output("feature-select", "options"),
         Input("feature-select", "id"),
     )
-    def populate_features(_):
-        return _feature_opts, _feature_default
+    def populate_feature_options(_):
+        return _feature_opts
 
     # ── Runs table view: switch columns + enrich data based on active tab ──────
     _METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc"]
@@ -1330,9 +1393,21 @@ def serve_app() -> dash.Dash:
             return [
                 dbc.Label("C (Regularização)"),
                 dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0),
+                dbc.Label("Penalty (Pena)"),
+                dcc.RadioItems(
+                    id="param-penalty",
+                    options=[
+                        {"label": " L2 (Ridge)", "value": "l2"},
+                        {"label": " L1 (Lasso)", "value": "l1"},
+                    ],
+                    value="l2",
+                    inputStyle={"marginRight": "6px"},
+                    labelStyle={"display": "block", "fontSize": "0.85rem"},
+                ),
                 html.Div(id="param-n", style={"display": "none"}),
                 html.Div(id="param-d", style={"display": "none"}),
                 html.Div(id="param-lr", style={"display": "none"}),
+                html.Div(id="param-subsample", style={"display": "none"}),
             ]
         if model == "xgb":
             return [
@@ -1342,7 +1417,10 @@ def serve_app() -> dash.Dash:
                 dcc.Slider(id="param-d", min=1, max=12, step=1, value=6),
                 dbc.Label("learning_rate (Taxa de aprendizado)"),
                 dcc.Slider(id="param-lr", min=0.01, max=0.5, step=0.01, value=0.1),
+                dbc.Label("subsample (Amostragem linhas)"),
+                dcc.Slider(id="param-subsample", min=0.5, max=1.0, step=0.1, value=1.0),
                 html.Div(id="param-C", style={"display": "none"}),
+                html.Div(id="param-penalty", style={"display": "none"}),
             ]
         # Random Forest
         return [
@@ -1350,8 +1428,12 @@ def serve_app() -> dash.Dash:
             dcc.Slider(id="param-n", min=10, max=500, step=10, value=100),
             dbc.Label("max_depth (Profundidade máxima)"),
             dcc.Slider(id="param-d", min=1, max=30, step=1, value=6),
+            dbc.Label("min_samples_split"),
+            dcc.Slider(id="param-min-split", min=2, max=20, step=1, value=2),
             html.Div(id="param-C", style={"display": "none"}),
             html.Div(id="param-lr", style={"display": "none"}),
+            html.Div(id="param-penalty", style={"display": "none"}),
+            html.Div(id="param-subsample", style={"display": "none"}),
         ]
 
     @app.callback(
@@ -1409,25 +1491,32 @@ def serve_app() -> dash.Dash:
 
         if model == "logreg":
             c_val = _extract_val(hyper_children, "param-C", 1.0)
+            penalty = _extract_val(hyper_children, "param-penalty", "l2")
             params["C"] = float(c_val if c_val is not None else 1.0)
+            params["penalty"] = "l1" if penalty == "l1" else "l2"
+            if params["penalty"] == "l1":
+                params["solver"] = "liblinear" # L1 needs liblinear or saga
         elif model == "xgb":
             n_val = _extract_val(hyper_children, "param-n", 100)
             d_val = _extract_val(hyper_children, "param-d", 6)
             lr_val = _extract_val(hyper_children, "param-lr", 0.1)
+            sub_val = _extract_val(hyper_children, "param-subsample", 1.0)
             params["n_estimators"] = int(n_val if n_val is not None else 100)
             params["max_depth"] = int(d_val if d_val is not None else 6)
             params["learning_rate"] = float(lr_val if lr_val is not None else 0.1)
+            params["subsample"] = float(sub_val if sub_val is not None else 1.0)
         else:
             n_val = _extract_val(hyper_children, "param-n", 100)
             d_val = _extract_val(hyper_children, "param-d", 6)
+            min_split = _extract_val(hyper_children, "param-min-split", 2)
             params["n_estimators"] = int(n_val if n_val is not None else 100)
             params["max_depth"] = int(d_val if d_val is not None else 6)
+            params["min_samples_split"] = int(min_split if min_split is not None else 2)
 
         cv_k = int(cv_folds_val or 5) if "enabled" in (cv_enabled or []) else 0
 
-        # run_experiment_and_log should now return a dict representing the run
-        # as per the tracker.py rewrite mentioned in context.
-        run_result = run_experiment_and_log(
+        # run_experiment_and_log returns (run_id, row_dict)
+        run_id, run_result = run_experiment_and_log(
             features or [],
             scaling,
             model,
@@ -1441,12 +1530,9 @@ def serve_app() -> dash.Dash:
 
         if isinstance(run_result, dict):
             data.append(run_result)
-            run_id = run_result.get("run_id", "unknown")
         else:
-            # Fallback if tracker still returns (run_id, metrics)
-            run_id, _ = run_result
-            # In this case we'd need to fetch or reconstruct, but user said tracker.py is rewritten
-            # to return a row dict.
+            # Reconstruct if it was just metrics (should not happen with updated tracker)
+            pass
 
         return html.Div([f"Last run: {run_id}"]), data
 
