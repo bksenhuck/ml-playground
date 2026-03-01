@@ -86,6 +86,7 @@ def run_training(
         })
         pipeline.fit(X_train, y_train)
 
+        # ── Test metrics (primary evaluation) ────────────────────────────────
         preds = pipeline.predict(X_test)
         probs = None
         try:
@@ -101,7 +102,23 @@ def run_training(
             "roc_auc": float(roc_auc_score(y_test, probs)) if probs is not None else 0.0,
         }
 
-        tracker.log_metrics(metrics)
+        # ── Train metrics (logged for overfitting detection) ──────────────────
+        train_preds = pipeline.predict(X_train)
+        try:
+            train_probs = pipeline.predict_proba(X_train)[:, 1]
+        except Exception:
+            train_probs = np.zeros_like(train_preds, dtype=float)
+
+        train_metrics = {
+            "train_accuracy":  float(accuracy_score(y_train, train_preds)),
+            "train_precision": float(precision_score(y_train, train_preds, zero_division=0)),
+            "train_recall":    float(recall_score(y_train, train_preds, zero_division=0)),
+            "train_f1":        float(f1_score(y_train, train_preds, zero_division=0)),
+            "train_roc_auc":   float(roc_auc_score(y_train, train_probs)),
+        }
+
+        # Log test + train metrics together; tracker.list_runs() picks them all up
+        tracker.log_metrics({**metrics, **train_metrics})
         try:
             tracker.log_model(pipeline)
         except Exception:

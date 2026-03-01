@@ -316,7 +316,11 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
         return _empty_fig("No runs to display")
 
     df = pd.DataFrame(runs_data)
-    metric_cols = [c for c in df.columns if c.startswith("metric_")]
+    # Only test metrics — skip train_ prefixed ones for readability
+    metric_cols = [
+        c for c in df.columns
+        if c.startswith("metric_") and "train" not in c
+    ]
     if not metric_cols:
         return _empty_fig("No metric columns found")
 
@@ -336,3 +340,205 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
         showlegend=False,
     )
     return fig
+
+
+# ── SHAP visualizations ───────────────────────────────────────────────────────
+# Cache: run_id → (shap_values, feat_names, X_t)  — instant repeat calls.
+_shap_cache: dict[str, tuple] = {}
+
+
+def _shap_available() -> bool:
+    """Return True if the shap package can be imported."""
+    import importlib.util  # noqa: PLC0415
+    return importlib.util.find_spec("shap") is not None
+
+
+def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
+    """Compute and cache SHAP values for a single run.
+
+    Selects the explainer automatically:
+      - TreeExplainer  for tree-based models (Random Forest)
+      - LinearExplainer for linear models (Logistic Regression)
+    Samples at most 500 rows for performance.
+
+    Returns:
+        (shap_values, feat_names, X_t) or (None, None, None) on any failure.
+    """
+    if run_id in _shap_cache:
+        return _shap_cache[run_id]
+
+    try:
+        import shap  # noqa: PLC0415
+
+        clf = model.named_steps["clf"]
+        preprocessor = model.named_steps["preproc"]
+
+        # Transform to model input space
+        X_t = preprocessor.transform(X_test)
+
+        # Densify sparse output (e.g. OneHotEncoder)
+        if hasattr(X_t, "toarray"):
+            X_t = X_t.toarray()
+
+        # Subsample for speed
+        if len(X_t) > 500:
+            rng = np.random.RandomState(42)
+            idx = rng.choice(len(X_t), 500, replace=False)
+            X_t = X_t[idx]
+
+        # Readable feature names
+        try:
+            raw_names = preprocessor.get_feature_names_out()
+            feat_names = [_clean_feat_name(n) for n in raw_names]
+        except Exception:
+            feat_names = [f"feat_{i}" for i in range(X_t.shape[1])]
+
+        # Choose explainer
+        if hasattr(clf, "feature_importances_"):
+            explainer = shap.TreeExplainer(clf)
+            sv = explainer.shap_values(X_t)
+        elif hasattr(clf, "coef_"):
+            explainer = shap.LinearExplainer(clf, X_t)
+            sv = explainer.shap_values(X_t)
+        else:
+            return None, None, None
+
+        # Binary classification → take class-1 array
+        if isinstance(sv, list) and len(sv) == 2:
+            sv = sv[1]
+
+        result = (np.array(sv), feat_names, X_t)
+        _shap_cache[run_id] = result
+        return result
+
+    except ImportError:
+        return None, None, None
+    except Exception:
+        return None, None, None
+
+
+def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
+    """SHAP summary: mean |SHAP value| per feature (global importance).
+
+    Grouped bar chart — up to 3 runs overlaid for comparison.
+    """
+    if not _shap_available():
+        return _empty_fig("SHAP não instalado. Execute: pip install shap")
+
+    valid = [r for r in runs_data if r.get("run_id")]
+    if not valid:
+        return _empty_fig("No runs selected")
+
+    fig = go.Figure()
+    any_plotted = False
+
+    for row in valid[:3]:
+        run_id = row["run_id"]
+        try:
+            model = _load_model(run_id)
+            X_test, _, _ = _reconstruct_test_data(row)
+            sv, feat_names, _ = _compute_shap_values(run_id, model, X_test)
+            if sv is None:
+                continue
+
+            mean_abs = np.abs(sv).mean(axis=0)
+            top_n = min(15, len(mean_abs))
+            idx = np.argsort(mean_abs)[::-1][:top_n]
+
+            fig.add_trace(go.Bar(
+                x=mean_abs[idx].tolist(),
+                y=[feat_names[i] for i in idx],
+                orientation="h",
+                name=_run_label(row),
+            ))
+            any_plotted = True
+        except Exception:
+            continue
+
+    if not any_plotted:
+        return _empty_fig("SHAP não disponível para os runs selecionados")
+
+    fig.update_layout(
+        title="SHAP Summary — Mean |SHAP Value|",
+        xaxis_title="Mean |SHAP Value|",
+        yaxis={"autorange": "reversed"},
+        barmode="group",
+        legend={"orientation": "h", "y": -0.2},
+    )
+    return fig
+
+
+def plot_shap_dependence(
+    runs_data: List[dict],
+    feature_name: str | None,
+) -> go.Figure:
+    """SHAP dependence plot for one feature on the first selected run.
+
+    X axis: transformed feature value.
+    Y axis: SHAP contribution (positive = towards class 1 / survived).
+    """
+    if not _shap_available():
+        return _empty_fig("SHAP não instalado. Execute: pip install shap")
+
+    if not feature_name:
+        return _empty_fig("Selecione uma feature no seletor acima")
+
+    valid = [r for r in runs_data if r.get("run_id")]
+    if not valid:
+        return _empty_fig("No runs selected")
+
+    row = valid[0]
+    run_id = row["run_id"]
+    try:
+        model = _load_model(run_id)
+        X_test, _, _ = _reconstruct_test_data(row)
+        sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
+
+        if sv is None:
+            return _empty_fig("SHAP não disponível para este modelo")
+
+        # Exact match first; then prefix match for one-hot encoded features
+        if feature_name in feat_names:
+            feat_idx = feat_names.index(feature_name)
+        else:
+            matched = [
+                i for i, fn in enumerate(feat_names)
+                if fn.startswith(feature_name)
+            ]
+            if not matched:
+                return _empty_fig(
+                    f"Feature '{feature_name}' não encontrada"
+                )
+            feat_idx = matched[0]
+
+        shap_col = sv[:, feat_idx]
+        feat_col = X_t[:, feat_idx]
+        col_name = feat_names[feat_idx]
+
+        fig = go.Figure(go.Scatter(
+            x=feat_col.tolist(),
+            y=shap_col.tolist(),
+            mode="markers",
+            marker={
+                "size": 6,
+                "opacity": 0.7,
+                "color": shap_col.tolist(),
+                "colorscale": "RdBu_r",
+                "showscale": True,
+                "colorbar": {"title": "SHAP"},
+            },
+            hovertemplate=(
+                f"<b>{col_name}</b>: %{{x:.3f}}<br>"
+                "SHAP: %{y:.3f}<extra></extra>"
+            ),
+        ))
+
+        fig.update_layout(
+            title=f"SHAP Dependence — {feature_name} ({_run_label(row)})",
+            xaxis_title=f"{col_name} (valor transformado)",
+            yaxis_title="SHAP Value",
+        )
+        return fig
+
+    except Exception as exc:
+        return _empty_fig(f"Erro ao calcular SHAP: {exc}")

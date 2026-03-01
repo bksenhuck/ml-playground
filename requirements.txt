@@ -7,5 +7,9 @@ pandas>=2.1.0
 numpy>=1.24.0
 seaborn>=0.12.0
 gunicorn>=20.1
-# LLM assistant — Vertex AI Gemini (free tier on GCP)
+# SHAP explainability
+shap>=0.44.0
+# LLM assistant — Vertex AI Gemini (optional, free tier on GCP)
 google-cloud-aiplatform>=1.38.0
+# .env file support for local development (optional — falls back gracefully)
+python-dotenv>=1.0.0

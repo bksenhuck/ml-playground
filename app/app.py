@@ -242,16 +242,62 @@ def serve_app() -> dash.Dash:
                                                         {"label": "Feature Importance",     "value": "feature_importance"},
                                                         {"label": "Calibration Curve",      "value": "calibration"},
                                                         {"label": "Metric Distribution",    "value": "metric_dist"},
+                                                        {"label": "SHAP Summary",           "value": "shap_summary"},
+                                                        {"label": "SHAP Dependence",        "value": "shap_dependence"},
                                                     ],
                                                     value="radar",
                                                     clearable=False,
                                                     className="mb-1",
                                                     style={"width": "300px", "fontSize": "0.9rem"}
                                                 ),
-                                                dcc.Graph(
-                                                    id="bottom-chart",
-                                                    style={"height": "calc(100vh - 540px)"},
-                                                    config={"displayModeBar": False}
+                                                # ── Controls row: metric mode + help + SHAP selector ──
+                                                html.Div(
+                                                    [
+                                                        dcc.RadioItems(
+                                                            id="metric-mode",
+                                                            options=[
+                                                                {"label": " Test",  "value": "test"},
+                                                                {"label": " Train", "value": "train"},
+                                                            ],
+                                                            value="test",
+                                                            inline=True,
+                                                            style={"fontSize": "0.78rem"},
+                                                        ),
+                                                        html.Span(
+                                                            "❓",
+                                                            id="chart-info-icon",
+                                                            style={
+                                                                "cursor": "help",
+                                                                "color": "#6c757d",
+                                                                "fontSize": "0.85rem",
+                                                            },
+                                                        ),
+                                                        dbc.Tooltip(
+                                                            id="chart-info-tooltip",
+                                                            target="chart-info-icon",
+                                                            placement="right",
+                                                        ),
+                                                        dcc.Dropdown(
+                                                            id="shap-feature-select",
+                                                            placeholder="Feature para SHAP...",
+                                                            clearable=False,
+                                                            style={
+                                                                "width": "190px",
+                                                                "fontSize": "0.82rem",
+                                                                "display": "none",
+                                                            },
+                                                        ),
+                                                    ],
+                                                    className="d-flex align-items-center gap-3 mb-1",
+                                                ),
+                                                dcc.Loading(
+                                                    dcc.Graph(
+                                                        id="bottom-chart",
+                                                        style={"height": "calc(100vh - 580px)"},
+                                                        config={"displayModeBar": False}
+                                                    ),
+                                                    type="circle",
+                                                    color="#2c7bb6",
                                                 ),
                                             ],
                                             style={"display": "flex", "flexDirection": "column", "padding": "10px"}
@@ -276,21 +322,25 @@ def serve_app() -> dash.Dash:
                                                         "Ask me anything about your experiment results or model performance.",
                                                         style={"fontSize": "0.85rem", "color": "#6c757d", "marginBottom": "15px"}
                                                     ),
-                                                    html.Div(
-                                                        id="assistant-messages",
-                                                        style={
-                                                            "flex": "1",
-                                                            "backgroundColor": "#f8f9fa",
-                                                            "borderRadius": "5px",
-                                                            "border": "1px solid #dee2e6",
-                                                            "padding": "10px",
-                                                            "marginBottom": "15px",
-                                                            "overflowY": "auto"
-                                                        },
-                                                        children=[
-                                                            html.Div("Assistente pronto. Selecione runs na tabela e faça uma pergunta.",
-                                                                     style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
-                                                        ]
+                                                    dcc.Loading(
+                                                        html.Div(
+                                                            id="assistant-messages",
+                                                            style={
+                                                                "flex": "1",
+                                                                "backgroundColor": "#f8f9fa",
+                                                                "borderRadius": "5px",
+                                                                "border": "1px solid #dee2e6",
+                                                                "padding": "10px",
+                                                                "marginBottom": "15px",
+                                                                "overflowY": "auto"
+                                                            },
+                                                            children=[
+                                                                html.Div("Assistente pronto. Selecione runs na tabela e faça uma pergunta.",
+                                                                         style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
+                                                            ]
+                                                        ),
+                                                        type="circle",
+                                                        color="#27ae60",
                                                     ),
                                                 ],
                                                 style={"display": "flex", "flexDirection": "column", "height": "calc(100% - 70px)"}
@@ -785,54 +835,88 @@ def serve_app() -> dash.Dash:
             data = []
         return html.Div([f"Last run: {run_id}"]), data
 
-    # Charts that need to load ML models from MLflow — require explicit row selection
-    _MODEL_CHARTS = {"roc", "pr_curve", "confusion_matrix", "feature_importance", "calibration"}
-
     @app.callback(
         Output("bottom-chart", "figure"),
         Input("runs-table", "data"),
         Input("runs-table", "selected_rows"),
         Input("chart-select-bottom", "value"),
+        Input("metric-mode", "value"),
+        Input("shap-feature-select", "value"),
     )
-    def update_chart(data, selected_rows: List[int], chart_select_bottom: str):
+    def update_chart(
+        data,
+        selected_rows: List[int],
+        chart_select_bottom: str,
+        metric_mode: str,
+        shap_feature: str,
+    ):
+        from app.plots import _empty_fig  # noqa: PLC0415
+
         df = pd.DataFrame(data or [])
         if df.empty:
             return px.line_polar()
 
         chart_type = chart_select_bottom or "radar"
+        mode = metric_mode or "test"
 
-        internal_metrics = ["metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]
-        display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
+        # ── Metric column selection (test vs train) ────────────────────────────
+        if mode == "train":
+            internal_metrics = [
+                "metric_train_accuracy", "metric_train_precision",
+                "metric_train_recall", "metric_train_f1", "metric_train_roc_auc",
+            ]
+            display_metrics = [
+                "Train Acc", "Train Prec", "Train Recall", "Train F1", "Train AUC",
+            ]
+        else:
+            internal_metrics = [
+                "metric_accuracy", "metric_precision",
+                "metric_recall", "metric_f1", "metric_roc_auc",
+            ]
+            display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
 
         # Always require explicit row selection — no automatic fallback.
         if not selected_rows:
-            from app.plots import _empty_fig
-            return _empty_fig("Selecione ao menos um experimento na tabela para ver o gráfico")
+            return _empty_fig(
+                "Selecione ao menos um experimento na tabela para ver o gráfico"
+            )
         sel = df.iloc[selected_rows]
 
+        # ── Bar F1 (respects metric-mode) ─────────────────────────────────────
         if chart_type == "bar_f1":
-            y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
+            y_col = (
+                "metric_train_f1" if mode == "train" else "metric_f1"
+            )
+            if y_col not in df.columns:
+                y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
             if y_col not in df.columns:
                 df[y_col] = 0.0
-
-            plot_df = sel if selected_rows else df
-            fig = px.bar(plot_df.sort_values(y_col, ascending=False) if y_col in plot_df.columns else plot_df,
-                         x="name" if "name" in plot_df.columns else plot_df.index,
-                         y=y_col, color="model" if "model" in plot_df.columns else None,
-                         title="F1 by run")
+            label = "Train F1" if mode == "train" else "F1"
+            fig = px.bar(
+                sel.sort_values(y_col, ascending=False) if y_col in sel.columns else sel,
+                x="run_name" if "run_name" in sel.columns else sel.index,
+                y=y_col,
+                color="model" if "model" in sel.columns else None,
+                title=f"{label} by run",
+            )
             return fig
 
-        # ── New chart types (delegated to app/plots.py) ───────────────────────
-        if chart_type in ("roc", "pr_curve", "confusion_matrix",
-                          "feature_importance", "calibration", "metric_dist"):
-            from app.plots import (
+        # ── Existing chart types (delegated to app/plots.py) ──────────────────
+        if chart_type in (
+            "roc", "pr_curve", "confusion_matrix",
+            "feature_importance", "calibration", "metric_dist",
+        ):
+            from app.plots import (  # noqa: PLC0415
                 plot_roc_curve, plot_pr_curve, plot_confusion_matrix,
                 plot_feature_importance, plot_calibration_curve,
                 plot_metric_distribution,
             )
-            # metric_dist uses all visible rows; model-heavy plots use sel only
-            runs_records = df.to_dict("records") if chart_type == "metric_dist" else sel.to_dict("records")
-
+            # metric_dist: all visible rows; model-heavy plots: selected only
+            runs_records = (
+                df.to_dict("records")
+                if chart_type == "metric_dist"
+                else sel.to_dict("records")
+            )
             if chart_type == "roc":
                 return plot_roc_curve(runs_records)
             if chart_type == "pr_curve":
@@ -846,9 +930,19 @@ def serve_app() -> dash.Dash:
             if chart_type == "metric_dist":
                 return plot_metric_distribution(runs_records)
 
-        # ── Default: radar chart (existing logic unchanged) ───────────────────
+        # ── SHAP chart types ───────────────────────────────────────────────────
+        if chart_type in ("shap_summary", "shap_dependence"):
+            from app.plots import plot_shap_summary, plot_shap_dependence  # noqa: PLC0415
+            runs_records = sel.to_dict("records")
+            if chart_type == "shap_summary":
+                return plot_shap_summary(runs_records)
+            return plot_shap_dependence(runs_records, shap_feature)
+
+        # ── Default: radar chart (existing logic — respects metric-mode) ───────
         available_internal = [m for m in internal_metrics if m in df.columns]
-        available_display = [display_metrics[internal_metrics.index(m)] for m in available_internal]
+        available_display = [
+            display_metrics[internal_metrics.index(m)] for m in available_internal
+        ]
 
         if not available_internal:
             return px.line_polar()
@@ -856,16 +950,55 @@ def serve_app() -> dash.Dash:
         fig = px.line_polar()
         for _, r in sel.iterrows():
             values = [float(r.get(m, 0) or 0) for m in available_internal]
-            label = r.get("name") or r.get("run_name") or r.get("run_id") or "Run"
-            fig.add_scatterpolar(r=values + [values[0]], theta=available_display + [available_display[0]],
-                                 name=str(label), fill="toself")
+            label = r.get("run_name") or r.get("name") or r.get("run_id") or "Run"
+            theta = available_display + [available_display[0]]
+            fig.add_scatterpolar(
+                r=values + [values[0]], theta=theta,
+                name=str(label), fill="toself",
+            )
 
+        suffix = " (Train)" if mode == "train" else ""
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
-            title="Model Comparison (Radar)"
+            title=f"Model Comparison (Radar){suffix}",
         )
         return fig
+
+    # ── ❓ tooltip — update text when chart type changes ───────────────────────
+    @app.callback(
+        Output("chart-info-tooltip", "children"),
+        Input("chart-select-bottom", "value"),
+    )
+    def update_chart_tooltip(chart_type: str) -> str:
+        from app.plot_help import PLOT_DESCRIPTIONS  # noqa: PLC0415
+        return PLOT_DESCRIPTIONS.get(chart_type or "radar", "")
+
+    # ── SHAP feature selector — show & populate when chart = shap_dependence ──
+    @app.callback(
+        Output("shap-feature-select", "options"),
+        Output("shap-feature-select", "style"),
+        Input("chart-select-bottom", "value"),
+        Input("runs-table", "data"),
+        Input("runs-table", "selected_rows"),
+    )
+    def update_shap_selector(chart_type, data, selected_rows):
+        base = {"width": "190px", "fontSize": "0.82rem"}
+        hidden  = {**base, "display": "none"}
+        visible = {**base, "display": "inline-block"}
+
+        if chart_type != "shap_dependence" or not selected_rows or not data:
+            return [], hidden
+
+        df = pd.DataFrame(data)
+        row = df.iloc[selected_rows[0]].to_dict()
+        features_str = str(row.get("features", "") or "")
+        features = [f.strip() for f in features_str.split(",") if f.strip()]
+        if not features:
+            features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+
+        opts = [{"label": f, "value": f} for f in features]
+        return opts, visible
 
     # ── LLM Insights Assistant callback ───────────────────────────────────────
     @app.callback(
@@ -878,18 +1011,20 @@ def serve_app() -> dash.Dash:
         prevent_initial_call=True,
     )
     def generate_llm_insight(n_clicks, question, table_data, selected_rows):
-        """Call Vertex AI Gemini with selected run context and the user question."""
+        """Hybrid LLM assistant: Gemini when available, local engine as fallback."""
         if not question or not question.strip():
             return no_update, no_update
 
-        runs_df = pd.DataFrame(table_data or [])
-        # Use selected rows as context if available; otherwise top 5 runs
-        if selected_rows and not runs_df.empty:
-            context_df = runs_df.iloc[selected_rows]
-        elif not runs_df.empty:
-            context_df = runs_df.head(5)
-        else:
-            context_df = runs_df
+        # Require explicit row selection — guide the user to pick experiments
+        if not selected_rows:
+            tip = html.Div(
+                "Selecione ao menos um experimento na tabela para obter insights.",
+                style={"fontSize": "0.82rem", "fontStyle": "italic", "color": "#adb5bd"},
+            )
+            return tip, no_update
+
+        runs_df    = pd.DataFrame(table_data or [])
+        context_df = runs_df.iloc[selected_rows] if not runs_df.empty else runs_df
 
         from llm.service import generate_insight
         answer = generate_insight(question.strip(), context_df)
