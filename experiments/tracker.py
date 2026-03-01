@@ -39,7 +39,13 @@ def log_metrics(metrics: Dict) -> None:
 
 
 def log_model(model, artifact_path: str = "model") -> None:
-    mlflow.sklearn.log_model(model, artifact_path)
+    # Use 'name' to resolve deprecation warning for artifact_path
+    # though technically both work in current MLflow, name is the future-proof param
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=UserWarning, module="mlflow.*")
+        warnings.filterwarnings("ignore", message=".*artifact_path.*")
+        mlflow.sklearn.log_model(model, artifact_path=artifact_path)
 
 
 def list_runs() -> pd.DataFrame:
@@ -47,30 +53,55 @@ def list_runs() -> pd.DataFrame:
 
     Uses MlflowClient.search_runs to assemble a tabular view.
     """
-    _ensure_tracking()
+    _setup()
     client = MlflowClient()
-    runs = client.search_runs(run_view_type=1, filter_string="", max_results=100)
+    exp = client.get_experiment_by_name(EXPERIMENT_NAME)
+    if not exp:
+        return _empty_df()
+    
+    runs = client.search_runs(experiment_ids=[exp.experiment_id], max_results=100)
     rows = []
     for r in runs:
+        # Pega parâmetros base
         data = {
             "run_id": r.info.run_id,
             "name": r.data.tags.get("mlflow.runName", ""),
-            "model": r.data.tags.get("model", ""),
+            "model": r.data.params.get("model", ""),
+            "scaling": r.data.params.get("scaling", ""),
+            "C": r.data.params.get("C", ""),
+            "n_estimators": r.data.params.get("n_estimators", ""),
+            "max_depth": r.data.params.get("max_depth", ""),
         }
-        # include a few metrics if present
+            
+        # Calcula n_features
+        features_str = r.data.params.get("features", "")
+        if features_str:
+            data["n_features"] = len([f.strip() for f in features_str.split(",") if f.strip()])
+        else:
+            data["n_features"] = 0
+
+        # Mapeia métricas com prefixo metric_
         for m in ("accuracy", "precision", "recall", "f1", "roc_auc"):
-            data[m] = float(r.data.metrics.get(m, 0.0))
+            val = float(r.data.metrics.get(m, 0.0))
+            data[f"metric_{m}"] = val
+            
         rows.append(data)
+    
     if not rows:
-        # return empty DataFrame with expected columns so callers can rely on schema
-        cols = ["run_id", "name", "model", "accuracy", "precision", "recall", "f1", "roc_auc"]
-        return pd.DataFrame(columns=cols)
+        return _empty_df()
+        
     df = pd.DataFrame(rows)
-    # ensure metric columns exist
+    # Garante que todas as colunas de métricas existam para evitar erros na tabela
     for m in ("accuracy", "precision", "recall", "f1", "roc_auc"):
-        if m not in df.columns:
-            df[m] = 0.0
+        col_name = f"metric_{m}"
+        if col_name not in df.columns:
+            df[col_name] = 0.0
     return df
+
+def _empty_df() -> pd.DataFrame:
+    metrics_cols = ["metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]
+    cols = ["run_id", "name", "model", "n_features", "C", "n_estimators", "max_depth", "scaling"] + metrics_cols
+    return pd.DataFrame(columns=cols)
 
 
 def client():
@@ -78,7 +109,16 @@ def client():
     return MlflowClient()
 
 
-def run_experiment_and_log(features, scaling, model_name, params, run_name: Optional[str] = None):
+def run_experiment_and_log(
+    features, 
+    scaling, 
+    model_name, 
+    params, 
+    run_name: Optional[str] = None,
+    test_size: float = 0.2,
+    class_weight: str = "none",
+    poly_features: bool = False
+):
     """Convenience wrapper that trains via ml.train and returns run info.
 
     The `run_name` is optional and will be passed through to the training run.
@@ -88,7 +128,16 @@ def run_experiment_and_log(features, scaling, model_name, params, run_name: Opti
 
     _ensure_tracking()
     # run_training will create and log the mlflow run; pass run_name through
-    run_id, metrics, est = run_training(features, scaling, model_name, params, run_name=run_name)
+    run_id, metrics, est = run_training(
+        features, 
+        scaling, 
+        model_name, 
+        params, 
+        run_name=run_name,
+        test_size=test_size,
+        class_weight=class_weight,
+        poly_features=poly_features
+    )
     return run_id, metrics
 
 
@@ -253,6 +302,14 @@ def list_runs() -> pd.DataFrame:
             "start_time": pd.Timestamp(run.info.start_time, unit="ms"),
         }
         record.update(run.data.params)
+        
+        # Calculate n_features from features param
+        features_str = run.data.params.get("features", "")
+        if features_str:
+            record["n_features"] = len([f.strip() for f in features_str.split(",") if f.strip()])
+        else:
+            record["n_features"] = 0
+            
         record.update({f"metric_{k}": v for k, v in run.data.metrics.items()})
         records.append(record)
 

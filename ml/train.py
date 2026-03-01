@@ -14,6 +14,17 @@ from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_sc
 from ml.pipeline import build_pipeline
 from experiments import tracker
 import seaborn as sns
+import warnings
+import logging
+
+# Desativar logs do MLflow no nível do logging do Python
+logging.getLogger("mlflow").setLevel(logging.ERROR)
+
+# Silence the MLflow pickle and deprecation warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="mlflow.*")
+warnings.filterwarnings("ignore", message=".*artifact_path.*")
+warnings.filterwarnings("ignore", message=".*Saving scikit-learn models.*")
+warnings.filterwarnings("ignore", message=".*pickle or cloudpickle.*")
 
 
 def _load_data() -> pd.DataFrame:
@@ -30,7 +41,11 @@ def _prepare_Xy(df: pd.DataFrame, features: List[str]):
     X = df[features].copy()
     # simple imputation for missing values
     for c in X.columns:
-        if X[c].dtype.name in ("object", "category"):
+        if isinstance(X[c].dtype, pd.CategoricalDtype):
+            if "missing" not in X[c].cat.categories:
+                X[c] = X[c].cat.add_categories("missing")
+            X[c] = X[c].fillna("missing")
+        elif X[c].dtype.name == "object":
             X[c] = X[c].fillna("missing")
         else:
             X[c] = X[c].fillna(X[c].median())
@@ -39,7 +54,14 @@ def _prepare_Xy(df: pd.DataFrame, features: List[str]):
 
 
 def run_training(
-    features: List[str], scaling: str, model_name: str, hyperparams: Dict, run_name: str | None = None
+    features: List[str], 
+    scaling: str, 
+    model_name: str, 
+    hyperparams: Dict, 
+    run_name: str | None = None,
+    test_size: float = 0.2,
+    class_weight: str = "none",
+    poly_features: bool = False
 ) -> Tuple[str, Dict, object]:
     """Train model, compute metrics and return (run_id, metrics, estimator).
 
@@ -47,14 +69,21 @@ def run_training(
     """
     df = _load_data()
     X, y = _prepare_Xy(df, features)
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
 
-    pipeline = build_pipeline(features, scaling, model_name, hyperparams)
+    pipeline = build_pipeline(features, scaling, model_name, hyperparams, class_weight=class_weight, poly_features=poly_features)
 
     # start mlflow run
     with tracker.start_run(run_name=run_name) as mlrun:
         run_id = mlrun.info.run_id
-        tracker.log_params({"model": model_name, **hyperparams, "features": ",".join(features)})
+        tracker.log_params({
+            "model": model_name, 
+            **hyperparams, 
+            "features": ",".join(features),
+            "test_size": test_size,
+            "class_weight": class_weight,
+            "poly_features": poly_features
+        })
         pipeline.fit(X_train, y_train)
 
         preds = pipeline.predict(X_test)

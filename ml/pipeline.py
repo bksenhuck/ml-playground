@@ -6,13 +6,18 @@ from typing import Dict, List
 from sklearn.compose import ColumnTransformer, make_column_selector
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
 
 
 def build_pipeline(
-    feature_columns: List[str], scaling: str, model_name: str, hyperparams: Dict
+    feature_columns: List[str], 
+    scaling: str, 
+    model_name: str, 
+    hyperparams: Dict,
+    class_weight: str = "none",
+    poly_features: bool = False
 ) -> Pipeline:
     """Return an sklearn Pipeline configured with preprocessing and estimator.
 
@@ -21,6 +26,8 @@ def build_pipeline(
     """
     # numeric pipeline: impute then optional scaler
     numeric_transformers = [("imputer", SimpleImputer(strategy="median"))]
+    if poly_features:
+        numeric_transformers.append(("poly", PolynomialFeatures(degree=2, interaction_only=True, include_bias=False)))
     if scaling == "standard":
         numeric_transformers.append(("scaler", StandardScaler()))
 
@@ -42,13 +49,15 @@ def build_pipeline(
         ], remainder="drop",
     )
 
+    cw = "balanced" if class_weight == "balanced" else None
+
     if model_name == "logreg":
         C = float(hyperparams.get("C", 1.0))
-        clf = LogisticRegression(C=C, max_iter=1000)
+        clf = LogisticRegression(C=C, max_iter=1000, class_weight=cw)
     else:
         n = int(hyperparams.get("n_estimators", 100))
         d = hyperparams.get("max_depth")
-        clf = RandomForestClassifier(n_estimators=n, max_depth=(int(d) if d else None))
+        clf = RandomForestClassifier(n_estimators=n, max_depth=(int(d) if d else None), class_weight=cw)
 
     pipeline = Pipeline([("preproc", preprocessor), ("clf", clf)])
     return pipeline

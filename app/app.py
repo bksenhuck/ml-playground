@@ -11,8 +11,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import dash
+from dash import Input, Output, State, dcc, html, dash_table, callback_context, no_update
 import dash_bootstrap_components as dbc
-from dash import Input, Output, State, dcc, html, dash_table
 import pandas as pd
 import plotly.express as px
 
@@ -32,21 +32,55 @@ def serve_app() -> dash.Dash:
     # Sidebar removed per user request (visualizations list removed)
     sidebar = html.Div()
 
+    # prepare dataset features for the features dropdown at layout creation
+    import seaborn as sns
+    _df = sns.load_dataset("titanic")
+    _features = [c for c in _df.columns if c not in ("survived",)]
+    _feature_opts = [{"label": f, "value": f} for f in _features]
+    _feature_default = [f for f in ["age", "sex", "pclass"] if f in _features]
+
     controls = dbc.Card(
         [
             dbc.CardHeader("Pipeline Configuration"),
             dbc.CardBody(
                 [
                     dbc.Label("Features (auto-filled from dataset)"),
-                    dcc.Dropdown(id="feature-select", multi=True),
+                    dcc.Dropdown(
+                        id="feature-select", 
+                        multi=True, 
+                        options=_feature_opts, 
+                        value=_feature_default,
+                        # Removido minHeight do style para usar o comportamento padrão do Dash
+                        # que expande conforme os itens são selecionados.
+                    ),
                     html.Hr(),
-                    dbc.Label("Scaling"),
+                    dbc.Label("Scaling Strategy"),
                     dcc.RadioItems(
                         id="scaling", options=[
                             {"label": "None", "value": "none"},
                             {"label": "StandardScaler", "value": "standard"},
                         ], value="standard",
                     ),
+                    html.Hr(),
+                    dbc.Label("Class Balancing"),
+                    dcc.RadioItems(
+                        id="class-weight",
+                        options=[
+                            {"label": "None", "value": "none"},
+                            {"label": "Balanced", "value": "balanced"}
+                        ],
+                        value="none",
+                    ),
+                    html.Hr(),
+                    dbc.Label("Polynomial Features"),
+                    dcc.Checklist(
+                        id="poly-features",
+                        options=[{"label": "Degree 2 Interactions", "value": "enabled"}],
+                        value=[]
+                    ),
+                    html.Hr(),
+                    dbc.Label("Train/Test Split (%)"),
+                    dcc.Slider(id="test-size-slider", min=10, max=50, step=5, value=20, marks={10: "10%", 20: "20%", 30: "30%", 40: "40%", 50: "50%"}),
                     html.Hr(),
                     dbc.Label("Model"),
                     dcc.RadioItems(
@@ -58,16 +92,10 @@ def serve_app() -> dash.Dash:
                         value="logreg",
                     ),
                     html.Hr(),
-                    dbc.Label("Chart"),
-                    dcc.Dropdown(
-                        id="chart-select",
-                        options=[
-                            {"label": "Radar (metrics)", "value": "radar"},
-                            {"label": "Bar — F1 by run", "value": "bar_f1"},
-                        ],
-                        value="radar",
-                    ),
-                    html.Div(id="hyperparams-area"),
+                    # initial hyperparams children (show sliders immediately)
+                    html.Div(id="hyperparams-area" , children=(
+                        [dbc.Label("C"), dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0)]
+                    )),
                     html.Hr(),
                     dbc.Label("Run name (optional)"),
                     dcc.Input(id="run-name", placeholder="optional run name", type="text", style={"width": "100%"}),
@@ -77,9 +105,10 @@ def serve_app() -> dash.Dash:
                         dbc.Col(dbc.Button("Delete All Runs", id="delete-btn", color="danger", class_name="w-100")),
                     ]),
                     html.Div(id="run-status", className="mt-2"),
-                ]
+                ],
+                style={"overflowY": "auto", "flex": "1"}
             ),
-        ], class_name="mb-3",
+        ], style={"height": "100%", "display": "flex", "flexDirection": "column"}
     )
 
     # initialize runs table data from MLflow (if available)
@@ -91,99 +120,222 @@ def serve_app() -> dash.Dash:
 
     runs_table = dash_table.DataTable(
         id="runs-table",
-        columns=[{"name": c, "id": c} for c in ["run_id", "name", "model", "accuracy", "f1"]],
-        data=initial_runs,
+        columns=[{"name": (c.replace("metric_", "").replace("_", " ").title() if "metric_" in c else c.replace("_", " ").title()), "id": c, "type": "numeric", "format": {"specifier": ".2f"} if "metric_" in c else None} 
+                 for c in ["run_name", "model", "n_features", "C", "n_estimators", "max_depth", "scaling", "class_weight", "poly_features", "test_size",
+                           "metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]],
+        data=initial_runs if initial_runs else [],
         row_selectable="multi",
         selected_rows=[],
-        style_table={"overflowX": "auto"},
+        style_table={"overflowX": "auto", "minWidth": "100%"},
+        style_cell={
+            "textAlign": "center",
+            "minWidth": "80px", "width": "80px", "maxWidth": "80px",
+            "overflow": "hidden",
+            "textOverflow": "ellipsis",
+        },
+        style_header={
+            "backgroundColor": "rgb(230, 230, 230)",
+            "fontWeight": "bold",
+            "textAlign": "center"
+        },
     )
 
     # placeholder for chart (now rendered in bottom-chart)
 
-    footer = dbc.Container(
-        html.Footer(
-            [
-                html.Div("ML Playground — lightweight experiment UI.", style={"fontWeight": "600"}),
-                html.Div("Built with Dash, scikit-learn and MLflow. "),
-            ],
-            style={"padding": "12px", "textAlign": "center", "color": "#666", "backgroundColor": "#f8f9fa"},
-        ),
-        fluid=True,
-    )
-
-    # Header / top bar
-    header = dbc.Navbar(
+    # Header - Solid, Clean, Modern
+    header = html.Div(
         dbc.Container(
-            [
-                dbc.Row(
-                    [
-                        dbc.Col(html.Img(src="", height="28px")),
-                        dbc.Col(html.H4("ML Playground", style={"margin": "0 0 0 8px"})),
-                    ], align="center", class_name="g-0",
-                ),
-                dbc.Container(html.Div("Run and compare classification experiments — Titanic dataset"), fluid=True),
-            ]
-        ),
-        color="#0d6efd",
-        dark=True,
-        class_name="mb-3",
-    )
-
-    # Layout: header, then main two-column area (left controls, right table+visuals), footer
-    app.layout = dbc.Container(
-        [
-            header,
             dbc.Row(
                 [
-                    # left column: sidebar + controls stacked
                     dbc.Col(
-                        [
-                            sidebar,
-                            html.Div(controls, style={"marginTop": "12px"}),
-                        ],
-                        width=3,
+                        html.H3("ML PLAYGROUND", style={"color": "white", "margin": 0, "fontWeight": "800", "letterSpacing": "2px"}),
+                        width="auto"
                     ),
-
-                    # right column: runs table on top, visualizations below
                     dbc.Col(
-                        [
-                            dbc.Card([
-                                dbc.CardHeader("Experiment Runs"),
-                                dbc.CardBody(runs_table),
-                            ]),
-                            html.Div(
-                                [
-                                    dbc.Card([
-                                        dbc.CardHeader("Visualizations"),
-                                        dbc.CardBody(
-                                            [
-                                                dcc.Dropdown(
-                                                    id="chart-select-bottom",
-                                                    options=[
-                                                        {"label": "Radar (metrics)", "value": "radar"},
-                                                        {"label": "Bar — F1 by run", "value": "bar_f1"},
-                                                    ],
-                                                    value="radar",
-                                                    clearable=False,
-                                                    style={"width": "50%"},
-                                                ),
-                                                dcc.Graph(id="bottom-chart", figure={}),
-                                            ]
-                                        ),
-                                    ])
-                                ],
-                                style={"marginTop": "12px"},
-                            ),
-                        ],
-                        width=9,
+                        html.Div("Titanic Experiment Discovery", style={"color": "white", "opacity": "0.7", "fontSize": "0.9rem", "marginLeft": "15px"}),
+                        width="auto",
+                        className="align-self-end pb-1"
+                    ),
+                    dbc.Col(
+                        dbc.Badge("v1.0 MVP", color="light", text_color="primary", className="ms-auto px-3"),
+                        width="auto",
+                        className="ms-auto"
                     ),
                 ],
-                align="start",
+                align="center",
+                className="h-100"
             ),
-            html.Hr(),
-            footer,
+            fluid=True,
+            style={"height": "100%"}
+        ),
+        style={
+            "backgroundColor": "#1a2a3a",
+            "height": "60px",
+            "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+            "zIndex": "1000"
+        }
+    )
+
+    # Footer - Simple, Fixed, Professional
+    footer = html.Div(
+        dbc.Container(
+            dbc.Row(
+                [
+                    dbc.Col(html.Small("© 2026 ML Playground. Built with Dash & MLflow.", className="text-muted")),
+                    dbc.Col(
+                        html.Div(
+                            [
+                                html.Small("Backend: ", className="text-muted me-2"),
+                                dbc.Badge("Live", color="success", pill=True, style={"fontSize": "0.6rem"}),
+                            ],
+                            className="text-end"
+                        ),
+                        width="auto"
+                    ),
+                ],
+                align="center"
+            ),
+            fluid=True
+        ),
+        style={
+            "height": "35px",
+            "backgroundColor": "#f8f9fa",
+            "borderTop": "1px solid #dee2e6",
+            "display": "flex",
+            "alignItems": "center",
+            "position": "fixed",
+            "bottom": "0",
+            "width": "100%",
+            "zIndex": "1000"
+        }
+    )
+
+    # Layout: Dashboard View (100% height, internal scrolls only)
+    app.layout = html.Div(
+        [
+            # CSS customizado para forçar altura do dropdown de features
+            html.Div(
+                children=[
+                    # Usando uma string literal no children para injetar o CSS
+                    # ou uma div invisível com style, preferimos a abordagem mais simples de layout
+                ],
+                style={"display": "none"}
+            ),
+            # CSS para silenciar o warning do Sklearn no frontend Dash (se houver) e outros ajustes
+            html.Div(id="dummy-output", style={"display": "none"}),
+            header,
+            dbc.Container(
+                [
+                    dbc.Row(
+                        [
+                            # Left: Config panel (increased slightly)
+                            dbc.Col(
+                                html.Div(controls, style={"height": "100%", "display": "flex", "flexDirection": "column"}),
+                                width=3,
+                                style={"height": "calc(100vh - 110px)"}
+                            ),
+                            # Right: Results area (stays the same)
+                            dbc.Col(
+                                [
+                                    dbc.Card(
+                                        [
+                                            dbc.CardHeader("Experiment Runs", style={"fontWeight": "600"}),
+                                            dbc.CardBody(runs_table, style={"padding": "0", "height": "250px", "overflowY": "auto"}),
+                                        ],
+                                        className="mb-3"
+                                    ),
+                                    dbc.Card(
+                                        [
+                                            dbc.CardHeader("Visualizations", style={"fontWeight": "600"}),
+                                            dbc.CardBody(
+                                                [
+                                                    dcc.Dropdown(
+                                                        id="chart-select-bottom",
+                                                        options=[
+                                                            {"label": "Radar (metrics)", "value": "radar"},
+                                                            {"label": "Bar — F1 by run", "value": "bar_f1"},
+                                                        ],
+                                                        value="radar",
+                                                        clearable=False,
+                                                        className="mb-1",
+                                                        style={"width": "300px", "fontSize": "0.9rem"}
+                                                    ),
+                                                    dcc.Graph(
+                                                        id="bottom-chart", 
+                                                        style={"height": "calc(100vh - 540px)"},
+                                                        config={"displayModeBar": False}
+                                                    ),
+                                                ],
+                                                style={"display": "flex", "flexDirection": "column", "padding": "10px"}
+                                            ),
+                                        ],
+                                        style={"flex": "1", "minHeight": "0"}
+                                    ),
+                                ],
+                                width=7,
+                                style={"height": "calc(100vh - 110px)", "display": "flex", "flexDirection": "column"}
+                            ),
+                            # Far Right: AI Assistant Placeholder (decreased by the same amount)
+                            dbc.Col(
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("AI Insights Assistant", style={"fontWeight": "600"}),
+                                        dbc.CardBody(
+                                            [
+                                                html.Div(
+                                                    [
+                                                        html.Div(
+                                                            "Ask me anything about your experiment results or model performance.",
+                                                            style={"fontSize": "0.85rem", "color": "#6c757d", "marginBottom": "15px"}
+                                                        ),
+                                                        # Placeholder for future chat messages
+                                                        html.Div(
+                                                            style={
+                                                                "flex": "1", 
+                                                                "backgroundColor": "#f8f9fa", 
+                                                                "borderRadius": "5px", 
+                                                                "border": "1px solid #dee2e6",
+                                                                "padding": "10px",
+                                                                "marginBottom": "15px",
+                                                                "overflowY": "auto"
+                                                            },
+                                                            children=[
+                                                                html.Div("System: Assistant is ready. (Module pending implementation)", 
+                                                                         style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
+                                                            ]
+                                                        ),
+                                                    ],
+                                                    style={"display": "flex", "flexDirection": "column", "height": "calc(100% - 70px)"}
+                                                ),
+                                                dbc.InputGroup(
+                                                    [
+                                                        dbc.Input(placeholder="Ask about your runs...", type="text", disabled=True),
+                                                        dbc.Button("Send", color="primary", disabled=True),
+                                                    ]
+                                                )
+                                            ],
+                                            style={"display": "flex", "flexDirection": "column", "height": "100%", "padding": "15px"}
+                                        ),
+                                    ],
+                                    style={"height": "100%", "display": "flex", "flexDirection": "column"}
+                                ),
+                                width=2,
+                                style={"height": "calc(100vh - 110px)"}
+                            ),
+                        ],
+                        className="g-4"
+                    )
+                ],
+                fluid=True,
+                style={"paddingTop": "20px", "height": "calc(100vh - 95px)"}
+            ),
+            footer
         ],
-        fluid=True,
+        style={
+            "height": "100vh",
+            "backgroundColor": "#f0f2f5",
+            "overflow": "hidden"
+        }
     )
 
     @app.callback(
@@ -192,14 +344,8 @@ def serve_app() -> dash.Dash:
         Input("feature-select", "id"),
     )
     def populate_features(_):
-        import seaborn as sns
-
-        df = sns.load_dataset("titanic")
-        features = [c for c in df.columns if c not in ("survived",)]
-        opts = [{"label": f, "value": f} for f in features]
-        # default pick a few
-        default = [f for f in ["age", "sex", "pclass"] if f in features]
-        return opts, default
+        # kept for compatibility: return the same options/value already set at layout
+        return _feature_opts, _feature_default
 
     @app.callback(Output("hyperparams-area", "children"), Input("model-select", "value"))
     def render_hyperparams(model: str):
@@ -216,36 +362,54 @@ def serve_app() -> dash.Dash:
         Output("run-status", "children"),
         Output("runs-table", "data"),
         Input("run-btn", "n_clicks"),
+        Input("delete-btn", "n_clicks"),
         State("feature-select", "value"),
         State("scaling", "value"),
+        State("class-weight", "value"),
+        State("poly-features", "value"),
+        State("test-size-slider", "value"),
         State("model-select", "value"),
-        State("hyperparams-area", "children"),
         State("run-name", "value"),
+        State("hyperparams-area", "children"),
         prevent_initial_call=True,
     )
-    def on_run(n_clicks: int, features: List[str], scaling: str, model: str, hyper_children, run_name: str | None):
-        """Run experiment using hyperparameters read from `hyperparams-area` children.
+    def handle_experiment_actions(run_clicks: int, delete_clicks: int, features: List[str], scaling: str, class_weight: str, poly_features: List[str], test_size: int, model: str, run_name: str | None, hyper_children):
+        """Unified callback for all experiment actions (Run/Delete) to avoid duplicate output conflicts."""
+        ctx = callback_context
+        if not ctx.triggered:
+            return no_update, no_update
+            
+        triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        
+        if triggered_id == "delete-btn":
+            from experiments.tracker import delete_all_runs
+            try:
+                count = delete_all_runs()
+                runs = list_runs()
+                return html.Div([f"Deleted {count} runs."]), runs.to_dict("records")
+            except Exception as e:
+                return html.Div([f"Delete failed: {e}"], style={"color": "red"}), []
+                
+        # Handle Run Action
+        params = {}
+        poly_enabled = "enabled" in (poly_features or [])
+        test_size_float = float(test_size) / 100.0
 
-        This avoids referencing slider IDs that may not exist in the layout initially.
-        """
-        params = {"scaling": scaling, "model": model}
-
-        # helper to extract slider value from children (list of component dicts)
+        # helper to extract slider value from children (recursive)
         def _extract_val(children, target_id, default=None):
             if not children:
                 return default
-            # children can be a list or a single component
             items = children if isinstance(children, list) else [children]
             for it in items:
                 try:
+                    # Dash component dict structure
                     props = it.get("props", {})
-                    comp_id = props.get("id")
-                    if comp_id == target_id:
+                    if props.get("id") == target_id:
                         return props.get("value", default)
-                    # nested children
+                    # check nested children
                     nested = props.get("children")
                     if nested:
-                        v = _extract_val(nested, target_id, default)
+                        v = _extract_val(nested, target_id, None)
                         if v is not None:
                             return v
                 except Exception:
@@ -253,72 +417,93 @@ def serve_app() -> dash.Dash:
             return default
 
         if model == "logreg":
-            c = _extract_val(hyper_children, "param-C", 1.0)
-            params["C"] = float(c or 1.0)
+            c_val = _extract_val(hyper_children, "param-C", 1.0)
+            params["C"] = float(c_val if c_val is not None else 1.0)
         else:
-            n = _extract_val(hyper_children, "param-n", 100)
-            d = _extract_val(hyper_children, "param-d", 6)
-            params["n_estimators"] = int(n or 100)
-            params["max_depth"] = int(d or 6)
+            n_val = _extract_val(hyper_children, "param-n", 100)
+            d_val = _extract_val(hyper_children, "param-d", 6)
+            params["n_estimators"] = int(n_val if n_val is not None else 100)
+            params["max_depth"] = int(d_val if d_val is not None else 6)
 
-        run_id, metrics = run_experiment_and_log(features or [], scaling, model, params, run_name=run_name)
+        run_id, metrics = run_experiment_and_log(
+            features or [], 
+            scaling, 
+            model, 
+            params, 
+            run_name=run_name,
+            test_size=test_size_float,
+            class_weight=class_weight,
+            poly_features=poly_enabled
+        )
         try:
-            runs = list_runs()
-            data = runs.to_dict("records")
+            data = list_runs().to_dict("records")
         except Exception:
             data = []
-        return html.Div([f"Last run: {run_id}" ]), data
+        return html.Div([f"Last run: {run_id}"]), data
 
-
-    @app.callback(
-        Output("run-status", "children"),
-        Output("runs-table", "data"),
-        Input("delete-btn", "n_clicks"),
-        prevent_initial_call=True,
-    )
-    def on_delete_all(n_clicks: int):
-        from experiments.tracker import delete_all_runs
-
-        try:
-            count = delete_all_runs()
-            runs = list_runs()
-            data = runs.to_dict("records")
-            return html.Div([f"Deleted {count} runs."]), data
-        except Exception as e:
-            return html.Div([f"Delete failed: {e}"], style={"color": "red"}), []
 
     @app.callback(
         Output("bottom-chart", "figure"),
         Input("runs-table", "data"),
         Input("runs-table", "selected_rows"),
-        Input("chart-select", "value"),
         Input("chart-select-bottom", "value"),
     )
-    def update_chart(data, selected_rows, chart_select_top, chart_select_bottom):
+    def update_chart(data, selected_rows: List[int], chart_select_bottom: str):
         df = pd.DataFrame(data or [])
         if df.empty:
             return px.line_polar()
 
-        # prefer bottom selector if present, else top selector
-        chart_type = chart_select_bottom or chart_select_top or "radar"
+        # prefer bottom selector
+        chart_type = chart_select_bottom or "radar"
+
+        # List of internal metric column names matching the MLflow data structure
+        internal_metrics = ["metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]
+        # Human readable names for the chart axes
+        display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
+
+        # filter for selected rows IF they exist, otherwise show top 3
+        if selected_rows:
+            sel = df.iloc[selected_rows]
+        else:
+            sort_col = "metric_f1" if "metric_f1" in df.columns else (df.columns[0] if not df.empty else None)
+            if sort_col and not df.empty:
+                sel = df.nlargest(min(3, len(df)), sort_col)
+            else:
+                sel = df.head(min(3, len(df)))
 
         if chart_type == "bar_f1":
-            bar = px.bar(df.sort_values("f1", ascending=False), x="run_id", y="f1", color="model", title="F1 by run")
-            return bar
+            # safe bar: if f1 missing, use 0.0
+            y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
+            if y_col not in df.columns:
+                df[y_col] = 0.0
+            
+            plot_df = sel if selected_rows else df
+            fig = px.bar(plot_df.sort_values(y_col, ascending=False) if y_col in plot_df.columns else plot_df, 
+                         x="name" if "name" in plot_df.columns else plot_df.index, 
+                         y=y_col, color="model" if "model" in plot_df.columns else None, 
+                         title="F1 by run")
+            return fig
 
-            if selected_rows:
-                sel = df.iloc[selected_rows]
-            else:
-                if "f1" in df.columns and not df["f1"].isna().all():
-                    sel = df.nlargest(3, "f1")
-                else:
-                    sel = df.head(3)
-            metrics = [m for m in ("accuracy", "precision", "recall", "f1", "roc_auc") if m in df.columns]
+        # default: radar chart
+        available_internal = [m for m in internal_metrics if m in df.columns]
+        available_display = [display_metrics[internal_metrics.index(m)] for m in available_internal]
+        
+        if not available_internal:
+            return px.line_polar()
+
         fig = px.line_polar()
         for _, r in sel.iterrows():
-            values = [r.get(m, 0) or 0 for m in metrics]
-            fig.add_scatterpolar(r=values + [values[0]], theta=metrics + [metrics[0]], name=str(r.get("run_id")))
-        fig.update_layout(polar=dict(radialaxis=dict(range=[0,1])), showlegend=True)
+            values = [float(r.get(m, 0) or 0) for m in available_internal]
+            # Use name if available for legend
+            label = r.get("name") or r.get("run_name") or r.get("run_id") or "Run"
+            fig.add_scatterpolar(r=values + [values[0]], theta=available_display + [available_display[0]], 
+                                 name=str(label), fill="toself")
+        
+        fig.update_layout(
+            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            showlegend=True,
+            title="Model Comparison (Radar)"
+        )
         return fig
 
     return app
