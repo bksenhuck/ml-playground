@@ -1,3 +1,113 @@
+"""Simple MLflow wrapper utilities.
+
+This module reads MLFLOW_TRACKING_URI and MLFLOW_ARTIFACT_URI from environment variables
+and provides convenience functions used by the Dash app.
+"""
+from __future__ import annotations
+
+import os
+from typing import Dict, Optional
+
+import mlflow
+from mlflow.tracking import MlflowClient
+import pandas as pd
+
+
+_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI")
+_ARTIFACT_URI = os.environ.get("MLFLOW_ARTIFACT_URI")
+
+
+def _ensure_tracking():
+    """Configure mlflow tracking URI; default to a local `mlruns` folder."""
+    if _TRACKING_URI:
+        mlflow.set_tracking_uri(_TRACKING_URI)
+    else:
+        mlflow.set_tracking_uri(f"file:{os.path.abspath('mlruns')}")
+
+
+def start_run(run_name: Optional[str] = None):
+    _ensure_tracking()
+    return mlflow.start_run(run_name=run_name)
+
+
+def log_params(params: Dict) -> None:
+    mlflow.log_params(params)
+
+
+def log_metrics(metrics: Dict) -> None:
+    mlflow.log_metrics(metrics)
+
+
+def log_model(model, artifact_path: str = "model") -> None:
+    mlflow.sklearn.log_model(model, artifact_path)
+
+
+def list_runs() -> pd.DataFrame:
+    """Return a DataFrame with recent runs and selected metrics.
+
+    Uses MlflowClient.search_runs to assemble a tabular view.
+    """
+    _ensure_tracking()
+    client = MlflowClient()
+    runs = client.search_runs(run_view_type=1, filter_string="", max_results=100)
+    rows = []
+    for r in runs:
+        data = {
+            "run_id": r.info.run_id,
+            "name": r.data.tags.get("mlflow.runName", ""),
+            "model": r.data.tags.get("model", ""),
+        }
+        # include a few metrics if present
+        for m in ("accuracy", "precision", "recall", "f1", "roc_auc"):
+            data[m] = float(r.data.metrics.get(m, 0.0))
+        rows.append(data)
+    if not rows:
+        # return empty DataFrame with expected columns so callers can rely on schema
+        cols = ["run_id", "name", "model", "accuracy", "precision", "recall", "f1", "roc_auc"]
+        return pd.DataFrame(columns=cols)
+    df = pd.DataFrame(rows)
+    # ensure metric columns exist
+    for m in ("accuracy", "precision", "recall", "f1", "roc_auc"):
+        if m not in df.columns:
+            df[m] = 0.0
+    return df
+
+
+def client():
+    _ensure_tracking()
+    return MlflowClient()
+
+
+def run_experiment_and_log(features, scaling, model_name, params, run_name: Optional[str] = None):
+    """Convenience wrapper that trains via ml.train and returns run info.
+
+    The `run_name` is optional and will be passed through to the training run.
+    To avoid circular imports, import training at call time.
+    """
+    from ml.train import run_training
+
+    _ensure_tracking()
+    # run_training will create and log the mlflow run; pass run_name through
+    run_id, metrics, est = run_training(features, scaling, model_name, params, run_name=run_name)
+    return run_id, metrics
+
+
+def delete_all_runs() -> int:
+    """Delete all runs from the configured MLflow tracking store.
+
+    Returns the number of runs deleted.
+    """
+    _ensure_tracking()
+    client = MlflowClient()
+    runs = client.search_runs(run_view_type=1, filter_string="", max_results=1000)
+    count = 0
+    for r in runs:
+        try:
+            client.delete_run(r.info.run_id)
+            count += 1
+        except Exception:
+            continue
+    return count
 """MLflow experiment tracker using a local SQLite backend."""
 
 import json

@@ -1,3 +1,84 @@
+"""Training orchestration: load data, train, compute metrics and return results.
+
+This module is intentionally compact for the MVP.
+"""
+from __future__ import annotations
+
+from typing import Dict, List, Tuple
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+
+from ml.pipeline import build_pipeline
+from experiments import tracker
+import seaborn as sns
+
+
+def _load_data() -> pd.DataFrame:
+    df = sns.load_dataset("titanic")
+    # target: survived
+    df = df.dropna(subset=["survived"])  # keep only rows with target
+    return df
+
+
+def _prepare_Xy(df: pd.DataFrame, features: List[str]):
+    if not features:
+        # default feature subset
+        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+    X = df[features].copy()
+    # simple imputation for missing values
+    for c in X.columns:
+        if X[c].dtype.name in ("object", "category"):
+            X[c] = X[c].fillna("missing")
+        else:
+            X[c] = X[c].fillna(X[c].median())
+    y = df["survived"].astype(int)
+    return X, y
+
+
+def run_training(
+    features: List[str], scaling: str, model_name: str, hyperparams: Dict, run_name: str | None = None
+) -> Tuple[str, Dict, object]:
+    """Train model, compute metrics and return (run_id, metrics, estimator).
+
+    This function also creates an mlflow run and uses the run id.
+    """
+    df = _load_data()
+    X, y = _prepare_Xy(df, features)
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+    pipeline = build_pipeline(features, scaling, model_name, hyperparams)
+
+    # start mlflow run
+    with tracker.start_run(run_name=run_name) as mlrun:
+        run_id = mlrun.info.run_id
+        tracker.log_params({"model": model_name, **hyperparams, "features": ",".join(features)})
+        pipeline.fit(X_train, y_train)
+
+        preds = pipeline.predict(X_test)
+        probs = None
+        try:
+            probs = pipeline.predict_proba(X_test)[:, 1]
+        except Exception:
+            probs = np.zeros_like(preds, dtype=float)
+
+        metrics = {
+            "accuracy": float(accuracy_score(y_test, preds)),
+            "precision": float(precision_score(y_test, preds, zero_division=0)),
+            "recall": float(recall_score(y_test, preds, zero_division=0)),
+            "f1": float(f1_score(y_test, preds, zero_division=0)),
+            "roc_auc": float(roc_auc_score(y_test, probs)) if probs is not None else 0.0,
+        }
+
+        tracker.log_metrics(metrics)
+        try:
+            tracker.log_model(pipeline)
+        except Exception:
+            pass
+
+    return run_id, metrics, pipeline
 """Dataset loading, preprocessing, and model evaluation utilities."""
 
 import pandas as pd

@@ -1,3 +1,14 @@
+"""UI component helpers for the Dash app (kept small)."""
+from __future__ import annotations
+
+from typing import Any
+
+import dash_bootstrap_components as dbc
+from dash import html
+
+
+def card(title: str, body: Any):
+    return dbc.Card([dbc.CardHeader(title), dbc.CardBody(body)])
 """Componentes de UI reutilizáveis — barra lateral do ML Playground."""
 
 import dash_bootstrap_components as dbc

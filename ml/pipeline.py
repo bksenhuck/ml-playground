@@ -1,62 +1,55 @@
-"""Build sklearn Pipelines dynamically from experiment configuration."""
+"""Build sklearn pipelines dynamically based on user selection."""
+from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Dict, List
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
+from sklearn.compose import ColumnTransformer, make_column_selector
+from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
-
-ModelType = Literal["logistic_regression", "random_forest"]
-ScalerType = Literal["none", "standard"]
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 
 
 def build_pipeline(
-    model_type: ModelType,
-    scaler_type: ScalerType = "none",
-    *,
-    lr_C: float = 1.0,
-    rf_n_estimators: int = 100,
-    rf_max_depth: int = 0,
+    feature_columns: List[str], scaling: str, model_name: str, hyperparams: Dict
 ) -> Pipeline:
-    """Build a sklearn Pipeline from the given configuration.
+    """Return an sklearn Pipeline configured with preprocessing and estimator.
 
-    Args:
-        model_type: One of ``'logistic_regression'`` or ``'random_forest'``.
-        scaler_type: One of ``'none'`` (no scaling) or ``'standard'``
-            (StandardScaler inserted before the model).
-        lr_C: Inverse regularization strength for Logistic Regression.
-            Smaller values mean stronger regularization.
-        rf_n_estimators: Number of trees for Random Forest.
-        rf_max_depth: Maximum tree depth for Random Forest.
-            ``0`` or negative means unlimited depth (``None``).
-
-    Returns:
-        An unfitted sklearn ``Pipeline`` ready to call ``.fit()`` on.
-
-    Raises:
-        ValueError: If ``model_type`` is not recognised.
+    feature_columns is for the calling code's bookkeeping; preprocessing operates on whatever
+    DataFrame columns are provided at fit time.
     """
-    steps: list[tuple[str, Any]] = []
+    # numeric pipeline: impute then optional scaler
+    numeric_transformers = [("imputer", SimpleImputer(strategy="median"))]
+    if scaling == "standard":
+        numeric_transformers.append(("scaler", StandardScaler()))
 
-    if scaler_type == "standard":
-        steps.append(("scaler", StandardScaler()))
+    numeric_pipeline = Pipeline(numeric_transformers)
 
-    if model_type == "logistic_regression":
-        estimator = LogisticRegression(
-            C=lr_C,
-            max_iter=1000,
-            random_state=42,
-        )
-    elif model_type == "random_forest":
-        depth = None if rf_max_depth <= 0 else rf_max_depth
-        estimator = RandomForestClassifier(
-            n_estimators=rf_n_estimators,
-            max_depth=depth,
-            random_state=42,
-        )
+    # categorical pipeline: impute then one-hot
+    categorical_pipeline = Pipeline(
+        [
+            ("imputer", SimpleImputer(strategy="most_frequent")),
+            ("ohe", OneHotEncoder(handle_unknown="ignore")),
+        ]
+    )
+
+    # Use selectors so transformers are applied to appropriate dtypes at fit time.
+    preprocessor = ColumnTransformer(
+        [
+            ("num", numeric_pipeline, make_column_selector(dtype_include=["number"])),
+            ("cat", categorical_pipeline, make_column_selector(dtype_include=["object", "category"])),
+        ], remainder="drop",
+    )
+
+    if model_name == "logreg":
+        C = float(hyperparams.get("C", 1.0))
+        clf = LogisticRegression(C=C, max_iter=1000)
     else:
-        raise ValueError(f"Unknown model_type: {model_type!r}")
+        n = int(hyperparams.get("n_estimators", 100))
+        d = hyperparams.get("max_depth")
+        clf = RandomForestClassifier(n_estimators=n, max_depth=(int(d) if d else None))
 
-    steps.append(("model", estimator))
-    return Pipeline(steps)
+    pipeline = Pipeline([("preproc", preprocessor), ("clf", clf)])
+    return pipeline
+

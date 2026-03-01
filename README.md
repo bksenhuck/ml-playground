@@ -1,3 +1,57 @@
+# ML Playground (Dash + MLflow)
+
+Small interactive playground to run classification experiments on the Titanic dataset and track runs with MLflow.
+
+Features
+- Configure features, scaling and model (LogisticRegression / RandomForest)
+- Run experiments and log params/metrics/artifacts to MLflow
+- Compare runs via table and radar chart
+
+Quickstart (local)
+
+1. Create a Python 3.11 venv and install dependencies
+
+```bash
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+pip install -r requirements.txt
+```
+
+2. Start MLflow server (recommended - SQLite backend)
+
+```bash
+# from project root
+mlflow server --backend-store-uri sqlite:///mlflow.db --default-artifact-root ./mlruns --host 0.0.0.0 --port 5000
+```
+
+Set `MLFLOW_TRACKING_URI` to point to the server (e.g. `http://localhost:5000`) or omit to use a local `mlruns` folder.
+
+3. Run the Dash app
+
+```bash
+python -m app.app
+# open http://127.0.0.1:8050
+```
+
+Deploy to Google Cloud Run
+
+1. Build a container image (example)
+
+```bash
+gcloud builds submit --tag gcr.io/PROJECT-ID/ml-playground
+gcloud run deploy ml-playground --image gcr.io/PROJECT-ID/ml-playground --platform managed --region REGION --allow-unauthenticated
+```
+
+Notes about MLflow on GCP
+- Cloud Run containers are stateless; for durable MLflow storage use Cloud SQL (backend-store) and a GCS bucket for artifacts.
+- You can run `mlflow server --backend-store-uri mysql://... --default-artifact-root gs://...` on a VM or Cloud Run with appropriate permissions.
+
+Files
+- `app/` — Dash app and UI
+- `ml/` — pipeline and training orchestration
+- `experiments/` — MLflow wrapper utilities
+
+License: MIT-style for the sample code (no license file included).
 # ML Experiment Playground
 
 An interactive machine learning experiment playground built with **Dash**, **Plotly**, **scikit-learn**, and **MLflow**.

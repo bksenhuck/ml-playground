@@ -1,3 +1,333 @@
+from __future__ import annotations
+
+import os
+from typing import List
+import sys
+from pathlib import Path
+
+# Ensure project root is on sys.path so sibling packages (experiments, ml) import correctly
+ROOT = Path(__file__).resolve().parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+import dash
+import dash_bootstrap_components as dbc
+from dash import Input, Output, State, dcc, html, dash_table
+import pandas as pd
+import plotly.express as px
+
+from experiments.tracker import list_runs, run_experiment_and_log
+
+
+APP_TITLE = "ML Playground"
+
+
+def serve_app() -> dash.Dash:
+    """Create and return the Dash app."""
+    app = dash.Dash(
+        __name__, external_stylesheets=[dbc.themes.FLATLY], suppress_callback_exceptions=True, title=APP_TITLE
+    )
+    server = app.server
+
+    # Sidebar removed per user request (visualizations list removed)
+    sidebar = html.Div()
+
+    controls = dbc.Card(
+        [
+            dbc.CardHeader("Pipeline Configuration"),
+            dbc.CardBody(
+                [
+                    dbc.Label("Features (auto-filled from dataset)"),
+                    dcc.Dropdown(id="feature-select", multi=True),
+                    html.Hr(),
+                    dbc.Label("Scaling"),
+                    dcc.RadioItems(
+                        id="scaling", options=[
+                            {"label": "None", "value": "none"},
+                            {"label": "StandardScaler", "value": "standard"},
+                        ], value="standard",
+                    ),
+                    html.Hr(),
+                    dbc.Label("Model"),
+                    dcc.RadioItems(
+                        id="model-select",
+                        options=[
+                            {"label": "Logistic Regression", "value": "logreg"},
+                            {"label": "Random Forest", "value": "rf"},
+                        ],
+                        value="logreg",
+                    ),
+                    html.Hr(),
+                    dbc.Label("Chart"),
+                    dcc.Dropdown(
+                        id="chart-select",
+                        options=[
+                            {"label": "Radar (metrics)", "value": "radar"},
+                            {"label": "Bar — F1 by run", "value": "bar_f1"},
+                        ],
+                        value="radar",
+                    ),
+                    html.Div(id="hyperparams-area"),
+                    html.Hr(),
+                    dbc.Label("Run name (optional)"),
+                    dcc.Input(id="run-name", placeholder="optional run name", type="text", style={"width": "100%"}),
+                    html.Br(), html.Br(),
+                    dbc.Row([
+                        dbc.Col(dbc.Button("Run Experiment", id="run-btn", color="primary", class_name="w-100")),
+                        dbc.Col(dbc.Button("Delete All Runs", id="delete-btn", color="danger", class_name="w-100")),
+                    ]),
+                    html.Div(id="run-status", className="mt-2"),
+                ]
+            ),
+        ], class_name="mb-3",
+    )
+
+    # initialize runs table data from MLflow (if available)
+    try:
+        runs_df = list_runs()
+        initial_runs = runs_df.to_dict("records")
+    except Exception:
+        initial_runs = []
+
+    runs_table = dash_table.DataTable(
+        id="runs-table",
+        columns=[{"name": c, "id": c} for c in ["run_id", "name", "model", "accuracy", "f1"]],
+        data=initial_runs,
+        row_selectable="multi",
+        selected_rows=[],
+        style_table={"overflowX": "auto"},
+    )
+
+    # placeholder for chart (now rendered in bottom-chart)
+
+    footer = dbc.Container(
+        html.Footer(
+            [
+                html.Div("ML Playground — lightweight experiment UI.", style={"fontWeight": "600"}),
+                html.Div("Built with Dash, scikit-learn and MLflow. "),
+            ],
+            style={"padding": "12px", "textAlign": "center", "color": "#666", "backgroundColor": "#f8f9fa"},
+        ),
+        fluid=True,
+    )
+
+    # Header / top bar
+    header = dbc.Navbar(
+        dbc.Container(
+            [
+                dbc.Row(
+                    [
+                        dbc.Col(html.Img(src="", height="28px")),
+                        dbc.Col(html.H4("ML Playground", style={"margin": "0 0 0 8px"})),
+                    ], align="center", class_name="g-0",
+                ),
+                dbc.Container(html.Div("Run and compare classification experiments — Titanic dataset"), fluid=True),
+            ]
+        ),
+        color="#0d6efd",
+        dark=True,
+        class_name="mb-3",
+    )
+
+    # Layout: header, then main two-column area (left controls, right table+visuals), footer
+    app.layout = dbc.Container(
+        [
+            header,
+            dbc.Row(
+                [
+                    # left column: sidebar + controls stacked
+                    dbc.Col(
+                        [
+                            sidebar,
+                            html.Div(controls, style={"marginTop": "12px"}),
+                        ],
+                        width=3,
+                    ),
+
+                    # right column: runs table on top, visualizations below
+                    dbc.Col(
+                        [
+                            dbc.Card([
+                                dbc.CardHeader("Experiment Runs"),
+                                dbc.CardBody(runs_table),
+                            ]),
+                            html.Div(
+                                [
+                                    dbc.Card([
+                                        dbc.CardHeader("Visualizations"),
+                                        dbc.CardBody(
+                                            [
+                                                dcc.Dropdown(
+                                                    id="chart-select-bottom",
+                                                    options=[
+                                                        {"label": "Radar (metrics)", "value": "radar"},
+                                                        {"label": "Bar — F1 by run", "value": "bar_f1"},
+                                                    ],
+                                                    value="radar",
+                                                    clearable=False,
+                                                    style={"width": "50%"},
+                                                ),
+                                                dcc.Graph(id="bottom-chart", figure={}),
+                                            ]
+                                        ),
+                                    ])
+                                ],
+                                style={"marginTop": "12px"},
+                            ),
+                        ],
+                        width=9,
+                    ),
+                ],
+                align="start",
+            ),
+            html.Hr(),
+            footer,
+        ],
+        fluid=True,
+    )
+
+    @app.callback(
+        Output("feature-select", "options"),
+        Output("feature-select", "value"),
+        Input("feature-select", "id"),
+    )
+    def populate_features(_):
+        import seaborn as sns
+
+        df = sns.load_dataset("titanic")
+        features = [c for c in df.columns if c not in ("survived",)]
+        opts = [{"label": f, "value": f} for f in features]
+        # default pick a few
+        default = [f for f in ["age", "sex", "pclass"] if f in features]
+        return opts, default
+
+    @app.callback(Output("hyperparams-area", "children"), Input("model-select", "value"))
+    def render_hyperparams(model: str):
+        if model == "logreg":
+            return [dbc.Label("C"), dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0)]
+        return [
+            dbc.Label("n_estimators"),
+            dcc.Slider(id="param-n", min=10, max=500, step=10, value=100),
+            dbc.Label("max_depth"),
+            dcc.Slider(id="param-d", min=1, max=30, step=1, value=6),
+        ]
+
+    @app.callback(
+        Output("run-status", "children"),
+        Output("runs-table", "data"),
+        Input("run-btn", "n_clicks"),
+        State("feature-select", "value"),
+        State("scaling", "value"),
+        State("model-select", "value"),
+        State("hyperparams-area", "children"),
+        State("run-name", "value"),
+        prevent_initial_call=True,
+    )
+    def on_run(n_clicks: int, features: List[str], scaling: str, model: str, hyper_children, run_name: str | None):
+        """Run experiment using hyperparameters read from `hyperparams-area` children.
+
+        This avoids referencing slider IDs that may not exist in the layout initially.
+        """
+        params = {"scaling": scaling, "model": model}
+
+        # helper to extract slider value from children (list of component dicts)
+        def _extract_val(children, target_id, default=None):
+            if not children:
+                return default
+            # children can be a list or a single component
+            items = children if isinstance(children, list) else [children]
+            for it in items:
+                try:
+                    props = it.get("props", {})
+                    comp_id = props.get("id")
+                    if comp_id == target_id:
+                        return props.get("value", default)
+                    # nested children
+                    nested = props.get("children")
+                    if nested:
+                        v = _extract_val(nested, target_id, default)
+                        if v is not None:
+                            return v
+                except Exception:
+                    continue
+            return default
+
+        if model == "logreg":
+            c = _extract_val(hyper_children, "param-C", 1.0)
+            params["C"] = float(c or 1.0)
+        else:
+            n = _extract_val(hyper_children, "param-n", 100)
+            d = _extract_val(hyper_children, "param-d", 6)
+            params["n_estimators"] = int(n or 100)
+            params["max_depth"] = int(d or 6)
+
+        run_id, metrics = run_experiment_and_log(features or [], scaling, model, params, run_name=run_name)
+        try:
+            runs = list_runs()
+            data = runs.to_dict("records")
+        except Exception:
+            data = []
+        return html.Div([f"Last run: {run_id}" ]), data
+
+
+    @app.callback(
+        Output("run-status", "children"),
+        Output("runs-table", "data"),
+        Input("delete-btn", "n_clicks"),
+        prevent_initial_call=True,
+    )
+    def on_delete_all(n_clicks: int):
+        from experiments.tracker import delete_all_runs
+
+        try:
+            count = delete_all_runs()
+            runs = list_runs()
+            data = runs.to_dict("records")
+            return html.Div([f"Deleted {count} runs."]), data
+        except Exception as e:
+            return html.Div([f"Delete failed: {e}"], style={"color": "red"}), []
+
+    @app.callback(
+        Output("bottom-chart", "figure"),
+        Input("runs-table", "data"),
+        Input("runs-table", "selected_rows"),
+        Input("chart-select", "value"),
+        Input("chart-select-bottom", "value"),
+    )
+    def update_chart(data, selected_rows, chart_select_top, chart_select_bottom):
+        df = pd.DataFrame(data or [])
+        if df.empty:
+            return px.line_polar()
+
+        # prefer bottom selector if present, else top selector
+        chart_type = chart_select_bottom or chart_select_top or "radar"
+
+        if chart_type == "bar_f1":
+            bar = px.bar(df.sort_values("f1", ascending=False), x="run_id", y="f1", color="model", title="F1 by run")
+            return bar
+
+            if selected_rows:
+                sel = df.iloc[selected_rows]
+            else:
+                if "f1" in df.columns and not df["f1"].isna().all():
+                    sel = df.nlargest(3, "f1")
+                else:
+                    sel = df.head(3)
+            metrics = [m for m in ("accuracy", "precision", "recall", "f1", "roc_auc") if m in df.columns]
+        fig = px.line_polar()
+        for _, r in sel.iterrows():
+            values = [r.get(m, 0) or 0 for m in metrics]
+            fig.add_scatterpolar(r=values + [values[0]], theta=metrics + [metrics[0]], name=str(r.get("run_id")))
+        fig.update_layout(polar=dict(radialaxis=dict(range=[0,1])), showlegend=True)
+        return fig
+
+    return app
+
+
+if __name__ == "__main__":
+    dash_app = serve_app()
+    # use `run` (newer Dash) instead of deprecated `run_server`
+    dash_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8050)), debug=True)
 """ML Experiment Playground — ponto de entrada da aplicação Dash.
 
 Execute a partir da raiz do projeto::
