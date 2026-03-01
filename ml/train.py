@@ -8,8 +8,8 @@ from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score
+from sklearn.model_selection import train_test_split, cross_validate
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, make_scorer
 
 from ml.pipeline import build_pipeline
 from experiments import tracker
@@ -54,14 +54,15 @@ def _prepare_Xy(df: pd.DataFrame, features: List[str]):
 
 
 def run_training(
-    features: List[str], 
-    scaling: str, 
-    model_name: str, 
-    hyperparams: Dict, 
+    features: List[str],
+    scaling: str,
+    model_name: str,
+    hyperparams: Dict,
     run_name: str | None = None,
     test_size: float = 0.2,
     class_weight: str = "none",
-    poly_features: bool = False
+    poly_features: bool = False,
+    cv_folds: int = 0,
 ) -> Tuple[str, Dict, object]:
     """Train model, compute metrics and return (run_id, metrics, estimator).
 
@@ -76,14 +77,17 @@ def run_training(
     # start mlflow run
     with tracker.start_run(run_name=run_name) as mlrun:
         run_id = mlrun.info.run_id
-        tracker.log_params({
-            "model": model_name, 
-            **hyperparams, 
+        log_p = {
+            "model": model_name,
+            **hyperparams,
             "features": ",".join(features),
             "test_size": test_size,
             "class_weight": class_weight,
-            "poly_features": poly_features
-        })
+            "poly_features": poly_features,
+        }
+        if cv_folds > 0:
+            log_p["cv_folds"] = cv_folds
+        tracker.log_params(log_p)
         pipeline.fit(X_train, y_train)
 
         # ── Test metrics (primary evaluation) ────────────────────────────────
@@ -117,8 +121,27 @@ def run_training(
             "train_roc_auc":   float(roc_auc_score(y_train, train_probs)),
         }
 
-        # Log test + train metrics together; tracker.list_runs() picks them all up
-        tracker.log_metrics({**metrics, **train_metrics})
+        all_metrics = {**metrics, **train_metrics}
+
+        # ── Cross-validation metrics (optional) ───────────────────────────────
+        if cv_folds > 0:
+            _cv_scoring = {
+                "accuracy":  "accuracy",
+                "precision": make_scorer(precision_score, zero_division=0),
+                "recall":    make_scorer(recall_score, zero_division=0),
+                "f1":        make_scorer(f1_score, zero_division=0),
+                "roc_auc":   "roc_auc",
+            }
+            cv_pipeline = build_pipeline(
+                features, scaling, model_name, hyperparams,
+                class_weight=class_weight, poly_features=poly_features,
+            )
+            cv_res = cross_validate(cv_pipeline, X, y, cv=cv_folds, scoring=_cv_scoring)
+            for m in ("accuracy", "precision", "recall", "f1", "roc_auc"):
+                all_metrics[f"cv_mean_{m}"] = float(np.mean(cv_res[f"test_{m}"]))
+                all_metrics[f"cv_std_{m}"]  = float(np.std(cv_res[f"test_{m}"]))
+
+        tracker.log_metrics(all_metrics)
         try:
             tracker.log_model(pipeline)
         except Exception:

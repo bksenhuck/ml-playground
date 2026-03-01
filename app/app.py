@@ -38,71 +38,170 @@ def serve_app() -> dash.Dash:
 
     controls = dbc.Card(
         [
-            dbc.CardHeader("Pipeline Configuration"),
-            dbc.CardBody(
-                [
-                    dbc.Label("Features (auto-filled from dataset)"),
-                    dcc.Dropdown(
-                        id="feature-select",
-                        multi=True,
-                        options=_feature_opts,
-                        value=_feature_default,
-                    ),
-                    html.Hr(),
-                    dbc.Label("Scaling Strategy"),
-                    dcc.RadioItems(
-                        id="scaling", options=[
-                            {"label": "None", "value": "none"},
-                            {"label": "StandardScaler", "value": "standard"},
-                        ], value="standard",
-                    ),
-                    html.Hr(),
-                    dbc.Label("Class Balancing"),
-                    dcc.RadioItems(
-                        id="class-weight",
-                        options=[
-                            {"label": "None", "value": "none"},
-                            {"label": "Balanced", "value": "balanced"}
-                        ],
-                        value="none",
-                    ),
-                    html.Hr(),
-                    dbc.Label("Polynomial Features"),
-                    dcc.Checklist(
-                        id="poly-features",
-                        options=[{"label": "Degree 2 Interactions", "value": "enabled"}],
-                        value=[]
-                    ),
-                    html.Hr(),
-                    dbc.Label("Train/Test Split (%)"),
-                    dcc.Slider(id="test-size-slider", min=10, max=50, step=5, value=20, marks={10: "10%", 20: "20%", 30: "30%", 40: "40%", 50: "50%"}),
-                    html.Hr(),
-                    dbc.Label("Model"),
-                    dcc.RadioItems(
-                        id="model-select",
-                        options=[
-                            {"label": "Logistic Regression", "value": "logreg"},
-                            {"label": "Random Forest", "value": "rf"},
-                        ],
-                        value="logreg",
-                    ),
-                    html.Hr(),
-                    html.Div(id="hyperparams-area", children=(
-                        [dbc.Label("C"), dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0)]
-                    )),
-                    html.Hr(),
-                    dbc.Label("Run name (optional)"),
-                    dcc.Input(id="run-name", placeholder="optional run name", type="text", style={"width": "100%"}),
-                    html.Br(), html.Br(),
-                    dbc.Row([
-                        dbc.Col(dbc.Button("Run Experiment", id="run-btn", color="primary", class_name="w-100")),
-                        dbc.Col(dbc.Button("Delete All Runs", id="delete-btn", color="danger", class_name="w-100")),
-                    ]),
-                    html.Div(id="run-status", className="mt-2"),
-                ],
-                style={"overflowY": "auto", "flex": "1"}
+            dbc.CardHeader(
+                html.Div(
+                    [
+                        html.Span("Pipeline Configuration", style={"fontWeight": "600", "fontSize": "0.95rem", "letterSpacing": "0.5px"}),
+                        html.Span("?", id="tooltip-pipeline", style={"cursor": "help", "color": "#6c757d", "fontSize": "0.7rem", "border": "1px solid #adb5bd", "borderRadius": "50%", "width": "15px", "height": "15px", "display": "inline-flex", "alignItems": "center", "justifyContent": "center", "marginLeft": "6px", "flexShrink": "0"}),
+                        dbc.Tooltip("Configure as features de entrada, transformações (scaling, polynomial) e hiperparâmetros do modelo. Clique em 'Run Experiment' para treinar e registrar um novo run.", target="tooltip-pipeline", placement="right"),
+                    ],
+                    className="d-flex align-items-center",
+                ),
             ),
-        ], style={"height": "100%", "display": "flex", "flexDirection": "column"}
+            dbc.CardBody(
+                dbc.Accordion(
+                    [
+                        # ── Features ──────────────────────────────────────
+                        dbc.AccordionItem(
+                            [
+                                dbc.Label("Colunas", className="fw-semibold mb-1"),
+                                dcc.Dropdown(
+                                    id="feature-select",
+                                    multi=True,
+                                    options=_feature_opts,
+                                    value=_feature_default,
+                                    placeholder="Selecione features…",
+                                ),
+                                html.Hr(className="my-2"),
+                                dcc.Checklist(
+                                    id="poly-features",
+                                    options=[{"label": " Polynomial Features (grau 2)", "value": "enabled"}],
+                                    value=[],
+                                    inputStyle={"marginRight": "6px"},
+                                ),
+                            ],
+                            title="Features",
+                            item_id="features",
+                        ),
+                        # ── Tratamentos ────────────────────────────────────
+                        dbc.AccordionItem(
+                            [
+                                dbc.Label("Scaling Strategy", className="fw-semibold mb-1"),
+                                dcc.RadioItems(
+                                    id="scaling",
+                                    options=[
+                                        {"label": " Nenhum", "value": "none"},
+                                        {"label": " StandardScaler", "value": "standard"},
+                                    ],
+                                    value="standard",
+                                    inputStyle={"marginRight": "6px"},
+                                    labelStyle={"display": "block", "marginBottom": "4px"},
+                                ),
+                                html.Hr(className="my-2"),
+                                dbc.Label("Class Balancing", className="fw-semibold mb-1"),
+                                dcc.RadioItems(
+                                    id="class-weight",
+                                    options=[
+                                        {"label": " Nenhum", "value": "none"},
+                                        {"label": " Balanced", "value": "balanced"},
+                                    ],
+                                    value="none",
+                                    inputStyle={"marginRight": "6px"},
+                                    labelStyle={"display": "block", "marginBottom": "4px"},
+                                ),
+                            ],
+                            title="Tratamentos",
+                            item_id="tratamentos",
+                        ),
+                        # ── Treinamento ────────────────────────────────────
+                        dbc.AccordionItem(
+                            [
+                                dbc.Label("Train/Test Split (%)", className="fw-semibold mb-1"),
+                                dcc.Slider(
+                                    id="test-size-slider",
+                                    min=10, max=50, step=5, value=20,
+                                    marks={10: "10%", 20: "20%", 30: "30%", 40: "40%", 50: "50%"},
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                ),
+                                html.Hr(className="my-2"),
+                                dbc.Label("Modelo", className="fw-semibold mb-1"),
+                                dcc.RadioItems(
+                                    id="model-select",
+                                    options=[
+                                        {"label": " Logistic Regression", "value": "logreg"},
+                                        {"label": " Random Forest", "value": "rf"},
+                                        {"label": " XGBoost", "value": "xgb"},
+                                    ],
+                                    value="logreg",
+                                    inputStyle={"marginRight": "6px"},
+                                    labelStyle={"display": "block", "marginBottom": "4px"},
+                                ),
+                                html.Hr(className="my-2"),
+                                dbc.Label("Cross-Validation", className="fw-semibold mb-1"),
+                                dcc.Checklist(
+                                    id="cv-enabled",
+                                    options=[{"label": " K-Fold CV", "value": "enabled"}],
+                                    value=[],
+                                    inputStyle={"marginRight": "6px"},
+                                ),
+                                dbc.Label("k folds", className="small text-muted mt-1 mb-0"),
+                                dcc.Slider(
+                                    id="cv-folds",
+                                    min=3, max=10, step=1, value=5,
+                                    marks={3: "3", 5: "5", 10: "10"},
+                                    tooltip={"placement": "bottom", "always_visible": False},
+                                ),
+                            ],
+                            title="Treinamento",
+                            item_id="treinamento",
+                        ),
+                        # ── Parâmetros ─────────────────────────────────────
+                        dbc.AccordionItem(
+                            [
+                                html.Div(
+                                    id="hyperparams-area",
+                                    children=[
+                                        dbc.Label("C"),
+                                        dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0),
+                                    ],
+                                ),
+                            ],
+                            title="Parâmetros",
+                            item_id="parametros",
+                        ),
+                        # ── General ────────────────────────────────────────
+                        dbc.AccordionItem(
+                            [
+                                dbc.Label("Nome do experimento", className="fw-semibold mb-1"),
+                                dcc.Input(
+                                    id="run-name",
+                                    placeholder="opcional…",
+                                    type="text",
+                                    style={"width": "100%"},
+                                    className="form-control form-control-sm",
+                                ),
+                            ],
+                            title="General",
+                            item_id="general",
+                        ),
+                    ],
+                    id="pipeline-accordion",
+                    always_open=True,
+                    active_item=["features", "treinamento", "parametros"],
+                    flush=True,
+                    className="border-0",
+                ),
+                style={"overflowY": "auto", "flex": "1", "padding": "0"},
+            ),
+            dbc.CardFooter(
+                [
+                    dbc.Row(
+                        [
+                            dbc.Col(
+                                dbc.Button("Run Experiment", id="run-btn", color="primary", class_name="w-100", size="sm"),
+                            ),
+                            dbc.Col(
+                                dbc.Button("Delete All Experiments", id="delete-btn", color="danger", class_name="w-100", size="sm"),
+                            ),
+                        ],
+                        className="g-2",
+                    ),
+                    html.Div(id="run-status", style={"display": "none"}),
+                ],
+                style={"backgroundColor": "#f8f9fa", "borderTop": "1px solid #dee2e6", "padding": "0.75rem"},
+            ),
+        ],
+        style={"height": "100%", "display": "flex", "flexDirection": "column"},
     )
 
     # initialize runs table data from MLflow (if available)
@@ -117,13 +216,13 @@ def serve_app() -> dash.Dash:
         columns=[{"name": (c.replace("metric_", "").replace("_", " ").title() if "metric_" in c else c.replace("_", " ").title()), "id": c, "type": "numeric", "format": {"specifier": ".2f"} if "metric_" in c else None}
                  for c in ["run_name", "model", "n_features", "C", "n_estimators", "max_depth", "scaling", "class_weight", "poly_features", "test_size",
                            "metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]],
-        data=initial_runs if initial_runs else [],
+        data=[],
         row_selectable="multi",
         selected_rows=[],
         style_table={"overflowX": "auto", "minWidth": "100%"},
         style_cell={
             "textAlign": "center",
-            "minWidth": "80px", "width": "80px", "maxWidth": "80px",
+            "minWidth": "80px",
             "overflow": "hidden",
             "textOverflow": "ellipsis",
         },
@@ -145,8 +244,10 @@ def serve_app() -> dash.Dash:
                 ),
                 dbc.Nav(
                     [
-                        dbc.NavItem(dbc.NavLink("Experimentos", href="/", active="exact")),
+                        dbc.NavItem(dbc.NavLink("Home", href="/", active="exact")),
+                        dbc.NavItem(dbc.NavLink("Experimentos", href="/experimentos", active="partial")),
                         dbc.NavItem(dbc.NavLink("Datasets", href="/datasets", active="partial")),
+                        dbc.NavItem(dbc.NavLink("Modelos", href="/modelos", active="partial")),
                         dbc.NavItem(dbc.NavLink("Sobre", href="/sobre", active="partial")),
                     ],
                     navbar=True,
@@ -205,6 +306,140 @@ def serve_app() -> dash.Dash:
 
     # ── Page layout functions ──────────────────────────────────────────────────
 
+    def welcome_layout():
+        _card_style = {
+            "border": "none",
+            "boxShadow": "0 2px 12px rgba(0,0,0,0.10)",
+            "cursor": "pointer",
+            "height": "100%",
+        }
+        _cards = [
+            {
+                "title": "Experimentos",
+                "icon": None,
+                "desc": (
+                    "Configure features, modelos e hiperparâmetros. "
+                    "Execute experimentos e compare resultados com MLflow."
+                ),
+                "href": "/experimentos",
+                "color": "#2980b9",
+            },
+            {
+                "title": "Datasets",
+                "icon": None,
+                "desc": (
+                    "Explore os datasets disponíveis, suas variáveis e "
+                    "características antes de iniciar os experimentos."
+                ),
+                "href": "/datasets",
+                "color": "#27ae60",
+            },
+            {
+                "title": "Metricas",
+                "icon": None,
+                "desc": (
+                    "Visualize e compare metricas dos modelos treinados: "
+                    "accuracy, F1, ROC AUC, SHAP e muito mais."
+                ),
+                "href": "/experimentos",
+                "color": "#8e44ad",
+            },
+            {
+                "title": "Sobre",
+                "icon": None,
+                "desc": (
+                    "Saiba mais sobre o ML Playground, a stack tecnologica "
+                    "e o roadmap de desenvolvimento."
+                ),
+                "href": "/sobre",
+                "color": "#e67e22",
+            },
+        ]
+        return dbc.Container(
+            [
+                dbc.Row(
+                    dbc.Col([
+                        html.H2(
+                            "Bem-vindo ao ML Playground",
+                            className="fw-bold mt-4 mb-1",
+                        ),
+                        html.P(
+                            "Uma plataforma interativa para exploração e "
+                            "experimentação com Machine Learning.",
+                            className="text-muted mb-4 fs-5",
+                        ),
+                    ])
+                ),
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            dbc.CardBody([
+                                html.H4(
+                                    "O que é o ML Playground?",
+                                    className="mb-3",
+                                ),
+                                html.P(
+                                    "Configure, execute e compare experimentos de Machine Learning "
+                                    "de forma visual e interativa — sem escrever código. "
+                                    "Escolha um módulo abaixo para começar.",
+                                    className="lead mb-0",
+                                ),
+                            ]),
+                            style={
+                                "border": "none",
+                                "boxShadow": "0 2px 8px rgba(0,0,0,0.08)",
+                                "borderLeft": "4px solid #2980b9",
+                            },
+                            className="mb-4",
+                        )
+                    )
+                ),
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dcc.Link(
+                                dbc.Card(
+                                    dbc.CardBody([
+                                        html.H5(
+                                            info["title"],
+                                            className="fw-bold mb-2",
+                                        ),
+                                        html.P(
+                                            info["desc"],
+                                            className="text-muted mb-0",
+                                            style={"fontSize": "0.9rem"},
+                                        ),
+                                        html.Div(
+                                            "Acessar →",
+                                            style={
+                                                "marginTop": "1rem",
+                                                "color": info["color"],
+                                                "fontWeight": "600",
+                                                "fontSize": "0.9rem",
+                                            },
+                                        ),
+                                    ], style={"textAlign": "center", "padding": "1.5rem"}),
+                                    style={
+                                        **_card_style,
+                                        "borderTop": f"4px solid {info['color']}",
+                                    },
+                                    className="h-100",
+                                ),
+                                href=info["href"],
+                                style={"textDecoration": "none"},
+                            ),
+                            md=3,
+                            className="mb-4",
+                        )
+                        for info in _cards
+                    ],
+                    className="mb-4",
+                ),
+            ],
+            fluid=True,
+            style={"paddingTop": "20px", "paddingBottom": "60px"},
+        )
+
     def home_layout():
         return dbc.Container(
             [
@@ -221,14 +456,64 @@ def serve_app() -> dash.Dash:
                             [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Experiment Runs", style={"fontWeight": "600"}),
-                                        dbc.CardBody(runs_table, style={"padding": "0", "height": "250px", "overflowY": "auto"}),
+                                        dbc.CardHeader(
+                                            html.Div(
+                                                [
+                                                    html.Div(
+                                                        [
+                                                            html.Span("Experimentos", style={"fontWeight": "600", "fontSize": "0.9rem"}),
+                                                            html.Span("?", id="tooltip-experiments", style={"cursor": "help", "color": "#6c757d", "fontSize": "0.7rem", "border": "1px solid #adb5bd", "borderRadius": "50%", "width": "15px", "height": "15px", "display": "inline-flex", "alignItems": "center", "justifyContent": "center", "marginLeft": "6px", "flexShrink": "0"}),
+                                                            dbc.Tooltip("Histórico de runs registrados. Selecione linhas para visualizar métricas nos gráficos abaixo. Use as abas para alternar entre métricas de teste, treino, overfitting e validação cruzada.", target="tooltip-experiments", placement="right"),
+                                                        ],
+                                                        className="d-flex align-items-center mb-1",
+                                                    ),
+                                                    html.Div(
+                                                        [
+                                                            dbc.Tabs(
+                                                                [
+                                                                    dbc.Tab(label="Teste",         tab_id="tab-test"),
+                                                                    dbc.Tab(label="Treino",        tab_id="tab-train"),
+                                                                    dbc.Tab(label="Overfitting ↓", tab_id="tab-overfit"),
+                                                                    dbc.Tab(label="Cross-Val",     tab_id="tab-cv"),
+                                                                ],
+                                                                id="runs-table-tabs",
+                                                                active_tab="tab-test",
+                                                                style={"marginBottom": "-1px"},
+                                                            ),
+                                                            dbc.Button(
+                                                                "Selecionar todos",
+                                                                id="select-all-btn",
+                                                                size="sm",
+                                                                color="link",
+                                                                className="ms-auto align-self-center",
+                                                                style={"fontSize": "0.75rem", "padding": "0 4px"},
+                                                            ),
+                                                        ],
+                                                        className="d-flex align-items-end",
+                                                    ),
+                                                ],
+                                            ),
+                                            style={"paddingBottom": "0"},
+                                        ),
+                                        dbc.CardBody(
+                                            runs_table,
+                                            style={"padding": "0", "height": "250px", "overflowY": "auto"},
+                                        ),
                                     ],
-                                    className="mb-3"
+                                    className="mb-3",
                                 ),
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("Visualizations", style={"fontWeight": "600"}),
+                                        dbc.CardHeader(
+                                            html.Div(
+                                                [
+                                                    html.Span("Visualizations", style={"fontWeight": "600"}),
+                                                    html.Span("?", id="tooltip-viz", style={"cursor": "help", "color": "#6c757d", "fontSize": "0.7rem", "border": "1px solid #adb5bd", "borderRadius": "50%", "width": "15px", "height": "15px", "display": "inline-flex", "alignItems": "center", "justifyContent": "center", "marginLeft": "6px", "flexShrink": "0"}),
+                                                    dbc.Tooltip("Gráficos interativos gerados a partir dos runs selecionados na tabela acima. Troque o tipo de visualização pelo dropdown.", target="tooltip-viz", placement="right"),
+                                                ],
+                                                className="d-flex align-items-center",
+                                            ),
+                                        ),
                                         dbc.CardBody(
                                             [
                                                 dcc.Dropdown(
@@ -250,33 +535,9 @@ def serve_app() -> dash.Dash:
                                                     className="mb-1",
                                                     style={"width": "300px", "fontSize": "0.9rem"}
                                                 ),
-                                                # ── Controls row: metric mode + help + SHAP selector ──
+                                                # ── Controls row: SHAP selector + chart description ──
                                                 html.Div(
                                                     [
-                                                        dcc.RadioItems(
-                                                            id="metric-mode",
-                                                            options=[
-                                                                {"label": " Test",  "value": "test"},
-                                                                {"label": " Train", "value": "train"},
-                                                            ],
-                                                            value="test",
-                                                            inline=True,
-                                                            style={"fontSize": "0.78rem"},
-                                                        ),
-                                                        html.Span(
-                                                            "❓",
-                                                            id="chart-info-icon",
-                                                            style={
-                                                                "cursor": "help",
-                                                                "color": "#6c757d",
-                                                                "fontSize": "0.85rem",
-                                                            },
-                                                        ),
-                                                        dbc.Tooltip(
-                                                            id="chart-info-tooltip",
-                                                            target="chart-info-icon",
-                                                            placement="right",
-                                                        ),
                                                         dcc.Dropdown(
                                                             id="shap-feature-select",
                                                             placeholder="Feature para SHAP...",
@@ -289,6 +550,20 @@ def serve_app() -> dash.Dash:
                                                         ),
                                                     ],
                                                     className="d-flex align-items-center gap-3 mb-1",
+                                                ),
+                                                html.Div(
+                                                    id="chart-info-text",
+                                                    style={
+                                                        "textAlign": "center",
+                                                        "fontSize": "0.78rem",
+                                                        "color": "#495057",
+                                                        "fontStyle": "italic",
+                                                        "backgroundColor": "#f8f9fa",
+                                                        "border": "1px solid #dee2e6",
+                                                        "borderRadius": "4px",
+                                                        "padding": "5px 12px",
+                                                        "marginBottom": "6px",
+                                                    },
                                                 ),
                                                 dcc.Loading(
                                                     dcc.Graph(
@@ -313,7 +588,16 @@ def serve_app() -> dash.Dash:
                         dbc.Col(
                             dbc.Card(
                                 [
-                                    dbc.CardHeader("AI Insights Assistant", style={"fontWeight": "600"}),
+                                    dbc.CardHeader(
+                                        html.Div(
+                                            [
+                                                html.Span("AI Insights Assistant", style={"fontWeight": "600"}),
+                                                html.Span("?", id="tooltip-ai", style={"cursor": "help", "color": "#6c757d", "fontSize": "0.7rem", "border": "1px solid #adb5bd", "borderRadius": "50%", "width": "15px", "height": "15px", "display": "inline-flex", "alignItems": "center", "justifyContent": "center", "marginLeft": "6px", "flexShrink": "0"}),
+                                                dbc.Tooltip("Assistente de IA que analisa os resultados dos seus experimentos. Selecione runs na tabela e faça perguntas sobre métricas, overfitting, comparação de modelos e muito mais.", target="tooltip-ai", placement="left"),
+                                            ],
+                                            className="d-flex align-items-center",
+                                        ),
+                                    ),
                                     dbc.CardBody(
                                         [
                                             html.Div(
@@ -568,6 +852,208 @@ def serve_app() -> dash.Dash:
             style={"paddingTop": "20px", "paddingBottom": "60px"},
         )
 
+    def models_layout():
+        card_style = {"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)"}
+
+        def param_table(rows):
+            return dbc.Table(
+                [
+                    html.Thead(html.Tr([
+                        html.Th("Parâmetro", style={"width": "18%"}),
+                        html.Th("Padrão", style={"width": "12%"}),
+                        html.Th("Range / Valores"),
+                        html.Th("O que faz"),
+                    ])),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td(html.Code(r[0])),
+                            html.Td(html.Code(str(r[1]))),
+                            html.Td(r[2]),
+                            html.Td(r[3]),
+                        ])
+                        for r in rows
+                    ]),
+                ],
+                bordered=True, hover=True, responsive=True, size="sm",
+                style={"fontSize": "0.82rem"},
+            )
+
+        logreg_params = [
+            (
+                "C",
+                1.0,
+                "0.01 – 10.0",
+                "Inverso da força de regularização L2. C alto = menos regularização "
+                "(modelo mais flexível, risco de overfitting). "
+                "C baixo = mais regularização (modelo mais simples, risco de underfitting).",
+            ),
+        ]
+        rf_params = [
+            (
+                "n_estimators",
+                100,
+                "10 – 500",
+                "Número de árvores na floresta. Mais árvores = menor variância e melhor "
+                "generalização, mas custo computacional maior. Valores acima de 200 "
+                "raramente trazem ganhos significativos.",
+            ),
+            (
+                "max_depth",
+                6,
+                "1 – 30",
+                "Profundidade máxima de cada árvore. Árvores mais rasas evitam overfitting; "
+                "árvores muito profundas memorizam o treino. None = sem limite (cresce "
+                "até folhas puras).",
+            ),
+        ]
+        xgb_params = [
+            (
+                "n_estimators",
+                100,
+                "10 – 500",
+                "Número de rounds de boosting (uma árvore por round). Quanto maior, "
+                "mais complexo o modelo — combine com learning_rate menor para "
+                "melhor generalização.",
+            ),
+            (
+                "max_depth",
+                6,
+                "1 – 12",
+                "Profundidade máxima de cada árvore base. Valores menores (3-6) "
+                "são preferíveis no XGBoost, pois o boosting corrige erros iterativamente.",
+            ),
+            (
+                "learning_rate",
+                0.1,
+                "0.01 – 0.5",
+                "Tamanho do passo de aprendizado (eta). Valores menores = aprendizado "
+                "mais lento mas mais robusto — compense aumentando n_estimators. "
+                "Regra prática: learning_rate × n_estimators ≈ constante.",
+            ),
+        ]
+
+        def model_card(
+            title, badge_text, badge_color, accent, summary, algo_html, params
+        ):
+            return dbc.Card(
+                [
+                    dbc.CardHeader(
+                        [
+                            dbc.Badge(
+                                badge_text, color=badge_color, className="me-2"
+                            ),
+                            html.Span(title, className="fw-bold fs-5"),
+                        ],
+                        style={
+                            "borderBottom": f"2px solid {accent}",
+                            "backgroundColor": "#f8f9fa",
+                        },
+                    ),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.H6("Como funciona?",
+                                        className="fw-bold",
+                                        style={"color": accent}),
+                                html.P(summary, className="mb-3"),
+                                algo_html,
+                            ], md=4),
+                            dbc.Col([
+                                html.H6("Hiperparâmetros disponíveis",
+                                        className="fw-bold",
+                                        style={"color": accent}),
+                                param_table(params),
+                            ], md=8),
+                        ]),
+                    ]),
+                ],
+                style=card_style,
+                className="mb-4",
+            )
+
+        logreg_algo = html.Div([
+            dbc.ListGroup([
+                dbc.ListGroupItem([html.Strong("Tipo: "), "Classificação linear"]),
+                dbc.ListGroupItem([html.Strong("Interpretável: "), "Sim — coeficientes por feature"]),
+                dbc.ListGroupItem([html.Strong("Regularização: "), "L2 (Ridge) por padrão"]),
+                dbc.ListGroupItem([html.Strong("Probabilidades: "), "Sim (sigmoid)"]),
+            ], flush=True, className="mb-2"),
+            html.Small(
+                "Ideal como baseline. Funciona bem com features normalizadas. "
+                "Sensível a features irrelevantes ou correlacionadas.",
+                className="text-muted",
+            ),
+        ])
+
+        rf_algo = html.Div([
+            dbc.ListGroup([
+                dbc.ListGroupItem([html.Strong("Tipo: "), "Ensemble de árvores (Bagging)"]),
+                dbc.ListGroupItem([html.Strong("Interpretável: "), "Parcialmente — feature importance"]),
+                dbc.ListGroupItem([html.Strong("Regularização: "), "Via max_depth e min_samples"]),
+                dbc.ListGroupItem([html.Strong("Probabilidades: "), "Sim (média das árvores)"]),
+            ], flush=True, className="mb-2"),
+            html.Small(
+                "Robusto a outliers e features não normalizadas. "
+                "Lida bem com features de diferentes escalas. "
+                "Paralelizável.",
+                className="text-muted",
+            ),
+        ])
+
+        xgb_algo = html.Div([
+            dbc.ListGroup([
+                dbc.ListGroupItem([html.Strong("Tipo: "), "Ensemble de árvores (Boosting)"]),
+                dbc.ListGroupItem([html.Strong("Interpretável: "), "Parcialmente — SHAP nativo"]),
+                dbc.ListGroupItem([html.Strong("Regularização: "), "L1 + L2 integradas"]),
+                dbc.ListGroupItem([html.Strong("Probabilidades: "), "Sim (sigmoid na saída)"]),
+            ], flush=True, className="mb-2"),
+            html.Small(
+                "Geralmente supera o Random Forest em benchmarks tabulares. "
+                "Constrói árvores sequencialmente, cada uma corrigindo os erros "
+                "da anterior. Suporta dados faltantes nativamente.",
+                className="text-muted",
+            ),
+        ])
+
+        return dbc.Container(
+            [
+                dbc.Row(
+                    dbc.Col([
+                        html.H2("Modelos", className="fw-bold mt-4 mb-1"),
+                        html.P(
+                            "Referência dos algoritmos disponíveis na plataforma — "
+                            "como funcionam, quando usar e o que cada hiperparâmetro controla.",
+                            className="text-muted mb-4",
+                        ),
+                    ])
+                ),
+                model_card(
+                    "Logistic Regression", "Classificação", "primary", "#2980b9",
+                    "Aprende um hiperplano linear que separa as classes. "
+                    "A saída passa por uma função sigmoid, produzindo probabilidades entre 0 e 1. "
+                    "Simples, rápido e muito interpretável — ótimo ponto de partida.",
+                    logreg_algo, logreg_params,
+                ),
+                model_card(
+                    "Random Forest", "Classificação", "success", "#27ae60",
+                    "Treina centenas de árvores de decisão em subconjuntos aleatórios dos dados "
+                    "(bootstrap) e features. A predição final é a média das probabilidades de "
+                    "todas as árvores, reduzindo variância sem aumentar viés.",
+                    rf_algo, rf_params,
+                ),
+                model_card(
+                    "XGBoost", "Classificação", "warning", "#e67e22",
+                    "Implementa Gradient Boosting com árvores de decisão. "
+                    "Cada árvore é treinada para corrigir os erros residuais das anteriores, "
+                    "usando gradiente descendente no espaço de funções. "
+                    "Inclui regularização L1/L2 nativa e é altamente eficiente.",
+                    xgb_algo, xgb_params,
+                ),
+            ],
+            fluid=True,
+            style={"paddingTop": "20px", "paddingBottom": "60px"},
+        )
+
     def about_layout():
         step_card_style = {"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)", "textAlign": "center"}
         return dbc.Container(
@@ -715,6 +1201,7 @@ def serve_app() -> dash.Dash:
     app.layout = html.Div(
         [
             html.Div(id="dummy-output", style={"display": "none"}),
+            dcc.Store(id="runs-data-store", data=initial_runs),
             dcc.Location(id="url", refresh=False),
             navbar,
             html.Div(id="page-content"),
@@ -730,11 +1217,15 @@ def serve_app() -> dash.Dash:
 
     @app.callback(Output("page-content", "children"), Input("url", "pathname"))
     def render_page_content(pathname):
-        if pathname == "/datasets":
+        if pathname == "/experimentos":
+            return home_layout()
+        elif pathname == "/datasets":
             return datasets_layout()
+        elif pathname == "/modelos":
+            return models_layout()
         elif pathname == "/sobre":
             return about_layout()
-        return home_layout()
+        return welcome_layout()
 
     @app.callback(
         Output("feature-select", "options"),
@@ -744,20 +1235,131 @@ def serve_app() -> dash.Dash:
     def populate_features(_):
         return _feature_opts, _feature_default
 
+    # ── Runs table view: switch columns + enrich data based on active tab ──────
+    _METRICS = ["accuracy", "precision", "recall", "f1", "roc_auc"]
+    _INFO_COLS = ["run_name", "model", "n_features", "scaling"]
+
+    @app.callback(
+        Output("runs-table", "data"),
+        Output("runs-table", "columns"),
+        Output("runs-table", "style_data_conditional"),
+        Input("runs-table-tabs", "active_tab"),
+        Input("runs-data-store", "data"),
+    )
+    def render_runs_table(active_tab, raw_data):
+        def _col(c):
+            base = c.replace("_", " ")
+            if c.startswith("metric_cv_mean_"):
+                name = "CV μ " + c.replace("metric_cv_mean_", "").replace("_", " ").title()
+            elif c.startswith("metric_cv_std_"):
+                name = "CV σ " + c.replace("metric_cv_std_", "").replace("_", " ").title()
+            elif c.startswith("metric_train_"):
+                name = "Train " + c.replace("metric_train_", "").replace("_", " ").title()
+            elif c.startswith("metric_"):
+                name = c.replace("metric_", "").replace("_", " ").title()
+            elif c.startswith("delta_"):
+                name = "Δ " + c.replace("delta_", "").replace("_", " ").title()
+            else:
+                name = base.title()
+            is_num = "metric_" in c or "delta_" in c
+            return {
+                "name": name, "id": c,
+                "type": "numeric" if is_num else "text",
+                "format": {"specifier": ".3f"} if is_num else None,
+            }
+
+        data = list(raw_data or [])
+
+        if active_tab == "tab-train":
+            cols = _INFO_COLS + [f"metric_train_{m}" for m in _METRICS]
+            return data, [_col(c) for c in cols], []
+
+        if active_tab == "tab-overfit":
+            for row in data:
+                for m in _METRICS:
+                    t  = float(row.get(f"metric_{m}", 0) or 0)
+                    tr = float(row.get(f"metric_train_{m}", 0) or 0)
+                    row[f"delta_{m}"] = round(tr - t, 4)
+            cols = ["run_name", "model"] + [f"delta_{m}" for m in _METRICS]
+            _RED    = {"backgroundColor": "#f8d7da", "color": "#721c24"}
+            _YELLOW = {"backgroundColor": "#fff3cd", "color": "#856404"}
+            _GREEN  = {"backgroundColor": "#d4edda", "color": "#155724"}
+            style_cond = []
+            for col in [f"delta_{m}" for m in _METRICS]:
+                style_cond += [
+                    {"if": {"filter_query": f"{{{col}}} >= 0.15",
+                            "column_id": col}, **_RED},
+                    {"if": {"filter_query": f"{{{col}}} >= 0.05 && {{{col}}} < 0.15",
+                            "column_id": col}, **_YELLOW},
+                    {"if": {"filter_query": f"{{{col}}} < 0.05",
+                            "column_id": col}, **_GREEN},
+                ]
+            return data, [_col(c) for c in cols], style_cond
+
+        if active_tab == "tab-cv":
+            cols = (
+                ["run_name", "model"]
+                + [f"metric_cv_mean_{m}" for m in _METRICS]
+                + [f"metric_cv_std_{m}" for m in _METRICS]
+            )
+            return data, [_col(c) for c in cols], []
+
+        # Default: tab-test
+        cols = (
+            ["run_name", "model", "n_features", "C", "n_estimators",
+             "max_depth", "scaling", "class_weight", "poly_features", "test_size"]
+            + [f"metric_{m}" for m in _METRICS]
+        )
+        return data, [_col(c) for c in cols], []
+
+    @app.callback(
+        Output("runs-table", "selected_rows"),
+        Input("select-all-btn", "n_clicks"),
+        State("runs-data-store", "data"),
+        State("runs-table", "selected_rows"),
+        prevent_initial_call=True,
+    )
+    def toggle_select_all(_, data, current):
+        n = len(data or [])
+        if n == 0:
+            return []
+        if len(current or []) == n:
+            return []
+        return list(range(n))
+
     @app.callback(Output("hyperparams-area", "children"), Input("model-select", "value"))
     def render_hyperparams(model: str):
         if model == "logreg":
-            return [dbc.Label("C"), dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0)]
+            return [
+                dbc.Label("C (Regularização)"),
+                dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0),
+                html.Div(id="param-n", style={"display": "none"}),
+                html.Div(id="param-d", style={"display": "none"}),
+                html.Div(id="param-lr", style={"display": "none"}),
+            ]
+        if model == "xgb":
+            return [
+                dbc.Label("n_estimators (Nº de árvores)"),
+                dcc.Slider(id="param-n", min=10, max=500, step=10, value=100),
+                dbc.Label("max_depth (Profundidade máxima)"),
+                dcc.Slider(id="param-d", min=1, max=12, step=1, value=6),
+                dbc.Label("learning_rate (Taxa de aprendizado)"),
+                dcc.Slider(id="param-lr", min=0.01, max=0.5, step=0.01, value=0.1),
+                html.Div(id="param-C", style={"display": "none"}),
+            ]
+        # Random Forest
         return [
-            dbc.Label("n_estimators"),
+            dbc.Label("n_estimators (Nº de árvores)"),
             dcc.Slider(id="param-n", min=10, max=500, step=10, value=100),
-            dbc.Label("max_depth"),
+            dbc.Label("max_depth (Profundidade máxima)"),
             dcc.Slider(id="param-d", min=1, max=30, step=1, value=6),
+            html.Div(id="param-C", style={"display": "none"}),
+            html.Div(id="param-lr", style={"display": "none"}),
         ]
 
     @app.callback(
         Output("run-status", "children"),
-        Output("runs-table", "data"),
+        Output("runs-data-store", "data"),
         Input("run-btn", "n_clicks"),
         Input("delete-btn", "n_clicks"),
         State("feature-select", "value"),
@@ -768,9 +1370,11 @@ def serve_app() -> dash.Dash:
         State("model-select", "value"),
         State("run-name", "value"),
         State("hyperparams-area", "children"),
+        State("cv-enabled", "value"),
+        State("cv-folds", "value"),
         prevent_initial_call=True,
     )
-    def handle_experiment_actions(run_clicks: int, delete_clicks: int, features: List[str], scaling: str, class_weight: str, poly_features: List[str], test_size: int, model: str, run_name: str | None, hyper_children):
+    def handle_experiment_actions(run_clicks: int, delete_clicks: int, features: List[str], scaling: str, class_weight: str, poly_features: List[str], test_size: int, model: str, run_name: str | None, hyper_children, cv_enabled, cv_folds_val):
         """Unified callback for all experiment actions (Run/Delete) to avoid duplicate output conflicts."""
         ctx = callback_context
         if not ctx.triggered:
@@ -813,11 +1417,20 @@ def serve_app() -> dash.Dash:
         if model == "logreg":
             c_val = _extract_val(hyper_children, "param-C", 1.0)
             params["C"] = float(c_val if c_val is not None else 1.0)
+        elif model == "xgb":
+            n_val = _extract_val(hyper_children, "param-n", 100)
+            d_val = _extract_val(hyper_children, "param-d", 6)
+            lr_val = _extract_val(hyper_children, "param-lr", 0.1)
+            params["n_estimators"] = int(n_val if n_val is not None else 100)
+            params["max_depth"] = int(d_val if d_val is not None else 6)
+            params["learning_rate"] = float(lr_val if lr_val is not None else 0.1)
         else:
             n_val = _extract_val(hyper_children, "param-n", 100)
             d_val = _extract_val(hyper_children, "param-d", 6)
             params["n_estimators"] = int(n_val if n_val is not None else 100)
             params["max_depth"] = int(d_val if d_val is not None else 6)
+
+        cv_k = int(cv_folds_val or 5) if "enabled" in (cv_enabled or []) else 0
 
         run_id, metrics = run_experiment_and_log(
             features or [],
@@ -827,7 +1440,8 @@ def serve_app() -> dash.Dash:
             run_name=run_name,
             test_size=test_size_float,
             class_weight=class_weight,
-            poly_features=poly_enabled
+            poly_features=poly_enabled,
+            cv_folds=cv_k,
         )
         try:
             data = list_runs().to_dict("records")
@@ -837,17 +1451,17 @@ def serve_app() -> dash.Dash:
 
     @app.callback(
         Output("bottom-chart", "figure"),
-        Input("runs-table", "data"),
+        Input("runs-data-store", "data"),
         Input("runs-table", "selected_rows"),
         Input("chart-select-bottom", "value"),
-        Input("metric-mode", "value"),
+        Input("runs-table-tabs", "active_tab"),
         Input("shap-feature-select", "value"),
     )
     def update_chart(
         data,
         selected_rows: List[int],
         chart_select_bottom: str,
-        metric_mode: str,
+        active_tab: str,
         shap_feature: str,
     ):
         from app.plots import _empty_fig  # noqa: PLC0415
@@ -857,7 +1471,7 @@ def serve_app() -> dash.Dash:
             return px.line_polar()
 
         chart_type = chart_select_bottom or "radar"
-        mode = metric_mode or "test"
+        mode = "train" if active_tab == "tab-train" else "test"
 
         # ── Metric column selection (test vs train) ────────────────────────────
         if mode == "train":
@@ -965,12 +1579,12 @@ def serve_app() -> dash.Dash:
         )
         return fig
 
-    # ── ❓ tooltip — update text when chart type changes ───────────────────────
+    # ── chart description — update text when chart type changes ────────────────
     @app.callback(
-        Output("chart-info-tooltip", "children"),
+        Output("chart-info-text", "children"),
         Input("chart-select-bottom", "value"),
     )
-    def update_chart_tooltip(chart_type: str) -> str:
+    def update_chart_info(chart_type: str) -> str:
         from app.plot_help import PLOT_DESCRIPTIONS  # noqa: PLC0415
         return PLOT_DESCRIPTIONS.get(chart_type or "radar", "")
 
@@ -979,7 +1593,7 @@ def serve_app() -> dash.Dash:
         Output("shap-feature-select", "options"),
         Output("shap-feature-select", "style"),
         Input("chart-select-bottom", "value"),
-        Input("runs-table", "data"),
+        Input("runs-data-store", "data"),
         Input("runs-table", "selected_rows"),
     )
     def update_shap_selector(chart_type, data, selected_rows):
@@ -1006,7 +1620,7 @@ def serve_app() -> dash.Dash:
         Output("assistant-input", "value"),
         Input("assistant-send", "n_clicks"),
         State("assistant-input", "value"),
-        State("runs-table", "data"),
+        State("runs-data-store", "data"),
         State("runs-table", "selected_rows"),
         prevent_initial_call=True,
     )
@@ -1027,7 +1641,8 @@ def serve_app() -> dash.Dash:
         context_df = runs_df.iloc[selected_rows] if not runs_df.empty else runs_df
 
         from llm.service import generate_insight
-        answer = generate_insight(question.strip(), context_df)
+        answer, source = generate_insight(question.strip(), context_df)
+        label = "Assistente(LLM)" if source == "llm" else "Assistente(Local)"
 
         messages = [
             html.Div(
@@ -1036,7 +1651,7 @@ def serve_app() -> dash.Dash:
                 style={"fontSize": "0.82rem"},
             ),
             html.Div(
-                [html.Strong("Assistente: ", style={"color": "#27ae60"}), answer],
+                [html.Strong(f"{label}: ", style={"color": "#27ae60"}), answer],
                 className="mb-1",
                 style={"fontSize": "0.82rem", "whiteSpace": "pre-wrap"},
             ),

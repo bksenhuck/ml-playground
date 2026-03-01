@@ -342,8 +342,8 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
     return fig
 
 
-# ── SHAP visualizations ───────────────────────────────────────────────────────
-# Cache: run_id → (shap_values, feat_names, X_t)  — instant repeat calls.
+# ── SHAP visualizations ──────────────────────────────────────────────────────
+# Cache: run_id → (shap_values, feat_names, X_t) — instant repeat calls.
 _shap_cache: dict[str, tuple] = {}
 
 
@@ -418,9 +418,15 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
 
 
 def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
-    """SHAP summary: mean |SHAP value| per feature (global importance).
+    """SHAP beeswarm summary — the classic SHAP visualisation.
 
-    Grouped bar chart — up to 3 runs overlaid for comparison.
+    Each dot = one test sample.
+    X axis : SHAP value (positive → pushes toward survived=1,
+                         negative → pushes toward survived=0).
+    Y axis : feature (top 15 by mean |SHAP|, most important at top).
+    Colour : normalised feature value — red = high value, blue = low value.
+
+    Uses only the first selected run (beeswarm is per-model).
     """
     if not _shap_available():
         return _empty_fig("SHAP não instalado. Execute: pip install shap")
@@ -429,43 +435,98 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
     if not valid:
         return _empty_fig("No runs selected")
 
-    fig = go.Figure()
-    any_plotted = False
+    row = valid[0]
+    run_id = row["run_id"]
+    try:
+        model = _load_model(run_id)
+        X_test, _, _ = _reconstruct_test_data(row)
+        sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
 
-    for row in valid[:3]:
-        run_id = row["run_id"]
-        try:
-            model = _load_model(run_id)
-            X_test, _, _ = _reconstruct_test_data(row)
-            sv, feat_names, _ = _compute_shap_values(run_id, model, X_test)
-            if sv is None:
-                continue
+        if sv is None:
+            return _empty_fig("SHAP não disponível para este modelo")
 
-            mean_abs = np.abs(sv).mean(axis=0)
-            top_n = min(15, len(mean_abs))
-            idx = np.argsort(mean_abs)[::-1][:top_n]
+        # Top 15 features by mean |SHAP|, sorted ascending so most
+        # important ends up at the top of the chart (y=14).
+        mean_abs = np.abs(sv).mean(axis=0)
+        top_n = min(15, len(mean_abs))
+        # Descending → take top_n → reverse so least important is at y=0
+        top_idx = np.argsort(mean_abs)[::-1][:top_n][::-1]
 
-            fig.add_trace(go.Bar(
-                x=mean_abs[idx].tolist(),
-                y=[feat_names[i] for i in idx],
-                orientation="h",
-                name=_run_label(row),
+        n_samples = sv.shape[0]
+        rng = np.random.RandomState(42)
+
+        fig = go.Figure()
+        show_colorbar = True  # only the first trace renders the colour scale
+
+        for rank, feat_i in enumerate(top_idx):
+            shap_vals = sv[:, feat_i]
+            feat_vals = X_t[:, feat_i]
+
+            # Normalise feature values to [0, 1] for colour mapping
+            f_min, f_max = feat_vals.min(), feat_vals.max()
+            feat_norm = (
+                (feat_vals - f_min) / (f_max - f_min)
+                if f_max > f_min
+                else np.full_like(feat_vals, 0.5)
+            )
+
+            # Small y-jitter for beeswarm spread
+            y_pos = rank + rng.uniform(-0.3, 0.3, size=n_samples)
+
+            fig.add_trace(go.Scatter(
+                x=shap_vals.tolist(),
+                y=y_pos.tolist(),
+                mode="markers",
+                name=feat_names[feat_i],
+                showlegend=False,
+                marker={
+                    "size": 5,
+                    "opacity": 0.65,
+                    "color": feat_norm.tolist(),
+                    "colorscale": "RdBu_r",
+                    "cmin": 0,
+                    "cmax": 1,
+                    "showscale": show_colorbar,
+                    "colorbar": {
+                        "title": "Valor da<br>feature",
+                        "tickvals": [0, 1],
+                        "ticktext": ["baixo", "alto"],
+                        "len": 0.5,
+                        "y": 0.5,
+                    },
+                },
+                hovertemplate=(
+                    f"<b>{feat_names[feat_i]}</b><br>"
+                    "SHAP: %{x:.3f}<br>"
+                    "Feature (norm): %{marker.color:.2f}"
+                    "<extra></extra>"
+                ),
             ))
-            any_plotted = True
-        except Exception:
-            continue
+            show_colorbar = False  # only first trace
 
-    if not any_plotted:
-        return _empty_fig("SHAP não disponível para os runs selecionados")
+        feat_labels = [feat_names[i] for i in top_idx]
 
-    fig.update_layout(
-        title="SHAP Summary — Mean |SHAP Value|",
-        xaxis_title="Mean |SHAP Value|",
-        yaxis={"autorange": "reversed"},
-        barmode="group",
-        legend={"orientation": "h", "y": -0.2},
-    )
-    return fig
+        fig.update_layout(
+            title=f"SHAP Summary (beeswarm) — {_run_label(row)}",
+            xaxis={
+                "title": "SHAP Value  ← sobreviveu=0  |  sobreviveu=1 →",
+                "zeroline": True,
+                "zerolinecolor": "lightgray",
+                "zerolinewidth": 1,
+            },
+            yaxis={
+                "tickmode": "array",
+                "tickvals": list(range(len(top_idx))),
+                "ticktext": feat_labels,
+                "showgrid": False,
+            },
+            showlegend=False,
+            margin={"l": 130, "r": 20, "t": 40, "b": 50},
+        )
+        return fig
+
+    except Exception as exc:
+        return _empty_fig(f"Erro ao calcular SHAP: {exc}")
 
 
 def plot_shap_dependence(

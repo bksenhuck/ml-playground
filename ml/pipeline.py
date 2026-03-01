@@ -9,6 +9,11 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, PolynomialFeatures
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+try:
+    from xgboost import XGBClassifier
+    _XGB_AVAILABLE = True
+except ImportError:
+    _XGB_AVAILABLE = False
 
 
 def build_pipeline(
@@ -54,6 +59,17 @@ def build_pipeline(
     if model_name == "logreg":
         C = float(hyperparams.get("C", 1.0))
         clf = LogisticRegression(C=C, max_iter=1000, class_weight=cw)
+    elif model_name == "xgb" and _XGB_AVAILABLE:
+        n = int(hyperparams.get("n_estimators", 100))
+        d = int(hyperparams.get("max_depth", 6))
+        lr = float(hyperparams.get("learning_rate", 0.1))
+        clf = XGBClassifier(
+            n_estimators=n,
+            max_depth=d,
+            learning_rate=lr,
+            eval_metric="logloss",
+            verbosity=0,
+        )
     else:
         n = int(hyperparams.get("n_estimators", 100))
         d = hyperparams.get("max_depth")

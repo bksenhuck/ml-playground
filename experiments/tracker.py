@@ -110,14 +110,15 @@ def client():
 
 
 def run_experiment_and_log(
-    features, 
-    scaling, 
-    model_name, 
-    params, 
+    features,
+    scaling,
+    model_name,
+    params,
     run_name: Optional[str] = None,
     test_size: float = 0.2,
     class_weight: str = "none",
-    poly_features: bool = False
+    poly_features: bool = False,
+    cv_folds: int = 0,
 ):
     """Convenience wrapper that trains via ml.train and returns run info.
 
@@ -127,16 +128,16 @@ def run_experiment_and_log(
     from ml.train import run_training
 
     _ensure_tracking()
-    # run_training will create and log the mlflow run; pass run_name through
     run_id, metrics, est = run_training(
-        features, 
-        scaling, 
-        model_name, 
-        params, 
+        features,
+        scaling,
+        model_name,
+        params,
         run_name=run_name,
         test_size=test_size,
         class_weight=class_weight,
-        poly_features=poly_features
+        poly_features=poly_features,
+        cv_folds=cv_folds,
     )
     return run_id, metrics
 
