@@ -234,8 +234,14 @@ def serve_app() -> dash.Dash:
                                                 dcc.Dropdown(
                                                     id="chart-select-bottom",
                                                     options=[
-                                                        {"label": "Radar (metrics)", "value": "radar"},
-                                                        {"label": "Bar — F1 by run", "value": "bar_f1"},
+                                                        {"label": "Radar (metrics)",        "value": "radar"},
+                                                        {"label": "Bar — F1 by run",        "value": "bar_f1"},
+                                                        {"label": "ROC Curve",              "value": "roc"},
+                                                        {"label": "Precision-Recall Curve", "value": "pr_curve"},
+                                                        {"label": "Confusion Matrix",       "value": "confusion_matrix"},
+                                                        {"label": "Feature Importance",     "value": "feature_importance"},
+                                                        {"label": "Calibration Curve",      "value": "calibration"},
+                                                        {"label": "Metric Distribution",    "value": "metric_dist"},
                                                     ],
                                                     value="radar",
                                                     clearable=False,
@@ -271,6 +277,7 @@ def serve_app() -> dash.Dash:
                                                         style={"fontSize": "0.85rem", "color": "#6c757d", "marginBottom": "15px"}
                                                     ),
                                                     html.Div(
+                                                        id="assistant-messages",
                                                         style={
                                                             "flex": "1",
                                                             "backgroundColor": "#f8f9fa",
@@ -281,7 +288,7 @@ def serve_app() -> dash.Dash:
                                                             "overflowY": "auto"
                                                         },
                                                         children=[
-                                                            html.Div("System: Assistant is ready. (Module pending implementation)",
+                                                            html.Div("Assistente pronto. Selecione runs na tabela e faça uma pergunta.",
                                                                      style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
                                                         ]
                                                     ),
@@ -290,8 +297,8 @@ def serve_app() -> dash.Dash:
                                             ),
                                             dbc.InputGroup(
                                                 [
-                                                    dbc.Input(placeholder="Ask about your runs...", type="text", disabled=True),
-                                                    dbc.Button("Send", color="primary", disabled=True),
+                                                    dbc.Input(id="assistant-input", placeholder="Pergunte sobre seus experimentos...", type="text"),
+                                                    dbc.Button("Enviar", id="assistant-send", color="primary"),
                                                 ]
                                             )
                                         ],
@@ -778,6 +785,9 @@ def serve_app() -> dash.Dash:
             data = []
         return html.Div([f"Last run: {run_id}"]), data
 
+    # Charts that need to load ML models from MLflow — require explicit row selection
+    _MODEL_CHARTS = {"roc", "pr_curve", "confusion_matrix", "feature_importance", "calibration"}
+
     @app.callback(
         Output("bottom-chart", "figure"),
         Input("runs-table", "data"),
@@ -794,14 +804,11 @@ def serve_app() -> dash.Dash:
         internal_metrics = ["metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]
         display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
 
-        if selected_rows:
-            sel = df.iloc[selected_rows]
-        else:
-            sort_col = "metric_f1" if "metric_f1" in df.columns else (df.columns[0] if not df.empty else None)
-            if sort_col and not df.empty:
-                sel = df.nlargest(min(3, len(df)), sort_col)
-            else:
-                sel = df.head(min(3, len(df)))
+        # Always require explicit row selection — no automatic fallback.
+        if not selected_rows:
+            from app.plots import _empty_fig
+            return _empty_fig("Selecione ao menos um experimento na tabela para ver o gráfico")
+        sel = df.iloc[selected_rows]
 
         if chart_type == "bar_f1":
             y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
@@ -815,6 +822,31 @@ def serve_app() -> dash.Dash:
                          title="F1 by run")
             return fig
 
+        # ── New chart types (delegated to app/plots.py) ───────────────────────
+        if chart_type in ("roc", "pr_curve", "confusion_matrix",
+                          "feature_importance", "calibration", "metric_dist"):
+            from app.plots import (
+                plot_roc_curve, plot_pr_curve, plot_confusion_matrix,
+                plot_feature_importance, plot_calibration_curve,
+                plot_metric_distribution,
+            )
+            # metric_dist uses all visible rows; model-heavy plots use sel only
+            runs_records = df.to_dict("records") if chart_type == "metric_dist" else sel.to_dict("records")
+
+            if chart_type == "roc":
+                return plot_roc_curve(runs_records)
+            if chart_type == "pr_curve":
+                return plot_pr_curve(runs_records)
+            if chart_type == "confusion_matrix":
+                return plot_confusion_matrix(runs_records)
+            if chart_type == "feature_importance":
+                return plot_feature_importance(runs_records)
+            if chart_type == "calibration":
+                return plot_calibration_curve(runs_records)
+            if chart_type == "metric_dist":
+                return plot_metric_distribution(runs_records)
+
+        # ── Default: radar chart (existing logic unchanged) ───────────────────
         available_internal = [m for m in internal_metrics if m in df.columns]
         available_display = [display_metrics[internal_metrics.index(m)] for m in available_internal]
 
@@ -834,6 +866,47 @@ def serve_app() -> dash.Dash:
             title="Model Comparison (Radar)"
         )
         return fig
+
+    # ── LLM Insights Assistant callback ───────────────────────────────────────
+    @app.callback(
+        Output("assistant-messages", "children"),
+        Output("assistant-input", "value"),
+        Input("assistant-send", "n_clicks"),
+        State("assistant-input", "value"),
+        State("runs-table", "data"),
+        State("runs-table", "selected_rows"),
+        prevent_initial_call=True,
+    )
+    def generate_llm_insight(n_clicks, question, table_data, selected_rows):
+        """Call Vertex AI Gemini with selected run context and the user question."""
+        if not question or not question.strip():
+            return no_update, no_update
+
+        runs_df = pd.DataFrame(table_data or [])
+        # Use selected rows as context if available; otherwise top 5 runs
+        if selected_rows and not runs_df.empty:
+            context_df = runs_df.iloc[selected_rows]
+        elif not runs_df.empty:
+            context_df = runs_df.head(5)
+        else:
+            context_df = runs_df
+
+        from llm.service import generate_insight
+        answer = generate_insight(question.strip(), context_df)
+
+        messages = [
+            html.Div(
+                [html.Strong("Você: ", style={"color": "#2980b9"}), question.strip()],
+                className="mb-2",
+                style={"fontSize": "0.82rem"},
+            ),
+            html.Div(
+                [html.Strong("Assistente: ", style={"color": "#27ae60"}), answer],
+                className="mb-1",
+                style={"fontSize": "0.82rem", "whiteSpace": "pre-wrap"},
+            ),
+        ]
+        return messages, ""  # clear input field after sending
 
     return app
 
