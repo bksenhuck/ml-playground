@@ -38,17 +38,15 @@ def _run(cmd: list[str], description: str) -> bool:
 
 
 def build(image: str) -> bool:
+    """Build and push image using Google Cloud Build (no local Docker needed)."""
     return _run(
-        ["docker", "build", "-t", image, "."],
-        "BUILD",
+        ["gcloud", "builds", "submit", "--tag", image, "."],
+        "BUILD (Cloud Build)",
     )
 
 
-def push(image: str) -> bool:
-    return _run(["docker", "push", image], "PUSH")
-
-
 def deploy(image: str) -> bool:
+    """Deploy the image to Cloud Run."""
     return _run(
         [
             "gcloud", "run", "deploy", settings.CLOUDRUN_SERVICE,
@@ -63,12 +61,12 @@ def deploy(image: str) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Build, push and deploy ML Playground to Cloud Run"
+        description="Build and deploy ML Playground to Cloud Run"
     )
     parser.add_argument(
         "--deploy-only",
         action="store_true",
-        help="Skip build and push — redeploy using the existing image",
+        help="Skip build — redeploy using the existing image",
     )
     args = parser.parse_args()
 
@@ -80,9 +78,8 @@ def main() -> None:
     logger.info("Service: %s  |  Region: %s", settings.CLOUDRUN_SERVICE, settings.GCP_REGION)
 
     if not args.deploy_only:
+        # gcloud builds submit already builds and pushes
         if not build(image):
-            sys.exit(1)
-        if not push(image):
             sys.exit(1)
 
     if not deploy(image):
