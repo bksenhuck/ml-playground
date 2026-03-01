@@ -29,9 +29,6 @@ def serve_app() -> dash.Dash:
     )
     server = app.server
 
-    # Sidebar removed per user request (visualizations list removed)
-    sidebar = html.Div()
-
     # prepare dataset features for the features dropdown at layout creation
     import seaborn as sns
     _df = sns.load_dataset("titanic")
@@ -46,12 +43,10 @@ def serve_app() -> dash.Dash:
                 [
                     dbc.Label("Features (auto-filled from dataset)"),
                     dcc.Dropdown(
-                        id="feature-select", 
-                        multi=True, 
-                        options=_feature_opts, 
+                        id="feature-select",
+                        multi=True,
+                        options=_feature_opts,
                         value=_feature_default,
-                        # Removido minHeight do style para usar o comportamento padrão do Dash
-                        # que expande conforme os itens são selecionados.
                     ),
                     html.Hr(),
                     dbc.Label("Scaling Strategy"),
@@ -92,8 +87,7 @@ def serve_app() -> dash.Dash:
                         value="logreg",
                     ),
                     html.Hr(),
-                    # initial hyperparams children (show sliders immediately)
-                    html.Div(id="hyperparams-area" , children=(
+                    html.Div(id="hyperparams-area", children=(
                         [dbc.Label("C"), dcc.Slider(id="param-C", min=0.01, max=10.0, step=0.01, value=1.0)]
                     )),
                     html.Hr(),
@@ -120,7 +114,7 @@ def serve_app() -> dash.Dash:
 
     runs_table = dash_table.DataTable(
         id="runs-table",
-        columns=[{"name": (c.replace("metric_", "").replace("_", " ").title() if "metric_" in c else c.replace("_", " ").title()), "id": c, "type": "numeric", "format": {"specifier": ".2f"} if "metric_" in c else None} 
+        columns=[{"name": (c.replace("metric_", "").replace("_", " ").title() if "metric_" in c else c.replace("_", " ").title()), "id": c, "type": "numeric", "format": {"specifier": ".2f"} if "metric_" in c else None}
                  for c in ["run_name", "model", "n_features", "C", "n_estimators", "max_depth", "scaling", "class_weight", "poly_features", "test_size",
                            "metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]],
         data=initial_runs if initial_runs else [],
@@ -140,43 +134,42 @@ def serve_app() -> dash.Dash:
         },
     )
 
-    # placeholder for chart (now rendered in bottom-chart)
-
-    # Header - Solid, Clean, Modern
-    header = html.Div(
+    # ── Navbar ─────────────────────────────────────────────────────────────────
+    navbar = dbc.Navbar(
         dbc.Container(
-            dbc.Row(
-                [
-                    dbc.Col(
-                        html.H3("ML PLAYGROUND", style={"color": "white", "margin": 0, "fontWeight": "800", "letterSpacing": "2px"}),
-                        width="auto"
-                    ),
-                    dbc.Col(
-                        html.Div("Titanic Experiment Discovery", style={"color": "white", "opacity": "0.7", "fontSize": "0.9rem", "marginLeft": "15px"}),
-                        width="auto",
-                        className="align-self-end pb-1"
-                    ),
-                    dbc.Col(
-                        dbc.Badge("v1.0 MVP", color="light", text_color="primary", className="ms-auto px-3"),
-                        width="auto",
-                        className="ms-auto"
-                    ),
-                ],
-                align="center",
-                className="h-100"
-            ),
+            [
+                dbc.NavbarBrand(
+                    "ML PLAYGROUND",
+                    href="/",
+                    style={"fontWeight": "800", "letterSpacing": "2px", "fontSize": "1.1rem"},
+                ),
+                dbc.Nav(
+                    [
+                        dbc.NavItem(dbc.NavLink("Experimentos", href="/", active="exact")),
+                        dbc.NavItem(dbc.NavLink("Datasets", href="/datasets", active="partial")),
+                        dbc.NavItem(dbc.NavLink("Sobre", href="/sobre", active="partial")),
+                    ],
+                    navbar=True,
+                    className="ms-4",
+                ),
+                dbc.Col(
+                    dbc.Badge("v1.0 MVP", color="light", text_color="primary", className="ms-auto px-3"),
+                    width="auto",
+                    className="ms-auto",
+                ),
+            ],
             fluid=True,
-            style={"height": "100%"}
         ),
+        dark=True,
         style={
             "backgroundColor": "#1a2a3a",
             "height": "60px",
             "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
-            "zIndex": "1000"
-        }
+            "zIndex": "1000",
+        },
     )
 
-    # Footer - Simple, Fixed, Professional
+    # ── Footer ─────────────────────────────────────────────────────────────────
     footer = html.Div(
         dbc.Container(
             dbc.Row(
@@ -210,133 +203,481 @@ def serve_app() -> dash.Dash:
         }
     )
 
-    # Layout: Dashboard View (100% height, internal scrolls only)
-    app.layout = html.Div(
-        [
-            # CSS customizado para forçar altura do dropdown de features
-            html.Div(
-                children=[
-                    # Usando uma string literal no children para injetar o CSS
-                    # ou uma div invisível com style, preferimos a abordagem mais simples de layout
-                ],
-                style={"display": "none"}
-            ),
-            # CSS para silenciar o warning do Sklearn no frontend Dash (se houver) e outros ajustes
-            html.Div(id="dummy-output", style={"display": "none"}),
-            header,
-            dbc.Container(
-                [
-                    dbc.Row(
-                        [
-                            # Left: Config panel (increased slightly)
-                            dbc.Col(
-                                html.Div(controls, style={"height": "100%", "display": "flex", "flexDirection": "column"}),
-                                width=3,
-                                style={"height": "calc(100vh - 110px)"}
-                            ),
-                            # Right: Results area (stays the same)
-                            dbc.Col(
-                                [
-                                    dbc.Card(
-                                        [
-                                            dbc.CardHeader("Experiment Runs", style={"fontWeight": "600"}),
-                                            dbc.CardBody(runs_table, style={"padding": "0", "height": "250px", "overflowY": "auto"}),
-                                        ],
-                                        className="mb-3"
-                                    ),
-                                    dbc.Card(
-                                        [
-                                            dbc.CardHeader("Visualizations", style={"fontWeight": "600"}),
-                                            dbc.CardBody(
-                                                [
-                                                    dcc.Dropdown(
-                                                        id="chart-select-bottom",
-                                                        options=[
-                                                            {"label": "Radar (metrics)", "value": "radar"},
-                                                            {"label": "Bar — F1 by run", "value": "bar_f1"},
-                                                        ],
-                                                        value="radar",
-                                                        clearable=False,
-                                                        className="mb-1",
-                                                        style={"width": "300px", "fontSize": "0.9rem"}
-                                                    ),
-                                                    dcc.Graph(
-                                                        id="bottom-chart", 
-                                                        style={"height": "calc(100vh - 540px)"},
-                                                        config={"displayModeBar": False}
-                                                    ),
-                                                ],
-                                                style={"display": "flex", "flexDirection": "column", "padding": "10px"}
-                                            ),
-                                        ],
-                                        style={"flex": "1", "minHeight": "0"}
-                                    ),
-                                ],
-                                width=7,
-                                style={"height": "calc(100vh - 110px)", "display": "flex", "flexDirection": "column"}
-                            ),
-                            # Far Right: AI Assistant Placeholder (decreased by the same amount)
-                            dbc.Col(
+    # ── Page layout functions ──────────────────────────────────────────────────
+
+    def home_layout():
+        return dbc.Container(
+            [
+                dbc.Row(
+                    [
+                        # Left: Config panel
+                        dbc.Col(
+                            html.Div(controls, style={"height": "100%", "display": "flex", "flexDirection": "column"}),
+                            width=3,
+                            style={"height": "calc(100vh - 110px)"}
+                        ),
+                        # Right: Results area
+                        dbc.Col(
+                            [
                                 dbc.Card(
                                     [
-                                        dbc.CardHeader("AI Insights Assistant", style={"fontWeight": "600"}),
+                                        dbc.CardHeader("Experiment Runs", style={"fontWeight": "600"}),
+                                        dbc.CardBody(runs_table, style={"padding": "0", "height": "250px", "overflowY": "auto"}),
+                                    ],
+                                    className="mb-3"
+                                ),
+                                dbc.Card(
+                                    [
+                                        dbc.CardHeader("Visualizations", style={"fontWeight": "600"}),
                                         dbc.CardBody(
                                             [
-                                                html.Div(
-                                                    [
-                                                        html.Div(
-                                                            "Ask me anything about your experiment results or model performance.",
-                                                            style={"fontSize": "0.85rem", "color": "#6c757d", "marginBottom": "15px"}
-                                                        ),
-                                                        # Placeholder for future chat messages
-                                                        html.Div(
-                                                            style={
-                                                                "flex": "1", 
-                                                                "backgroundColor": "#f8f9fa", 
-                                                                "borderRadius": "5px", 
-                                                                "border": "1px solid #dee2e6",
-                                                                "padding": "10px",
-                                                                "marginBottom": "15px",
-                                                                "overflowY": "auto"
-                                                            },
-                                                            children=[
-                                                                html.Div("System: Assistant is ready. (Module pending implementation)", 
-                                                                         style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
-                                                            ]
-                                                        ),
+                                                dcc.Dropdown(
+                                                    id="chart-select-bottom",
+                                                    options=[
+                                                        {"label": "Radar (metrics)", "value": "radar"},
+                                                        {"label": "Bar — F1 by run", "value": "bar_f1"},
                                                     ],
-                                                    style={"display": "flex", "flexDirection": "column", "height": "calc(100% - 70px)"}
+                                                    value="radar",
+                                                    clearable=False,
+                                                    className="mb-1",
+                                                    style={"width": "300px", "fontSize": "0.9rem"}
                                                 ),
-                                                dbc.InputGroup(
-                                                    [
-                                                        dbc.Input(placeholder="Ask about your runs...", type="text", disabled=True),
-                                                        dbc.Button("Send", color="primary", disabled=True),
-                                                    ]
-                                                )
+                                                dcc.Graph(
+                                                    id="bottom-chart",
+                                                    style={"height": "calc(100vh - 540px)"},
+                                                    config={"displayModeBar": False}
+                                                ),
                                             ],
-                                            style={"display": "flex", "flexDirection": "column", "height": "100%", "padding": "15px"}
+                                            style={"display": "flex", "flexDirection": "column", "padding": "10px"}
                                         ),
                                     ],
-                                    style={"height": "100%", "display": "flex", "flexDirection": "column"}
+                                    style={"flex": "1", "minHeight": "0"}
                                 ),
-                                width=2,
-                                style={"height": "calc(100vh - 110px)"}
+                            ],
+                            width=7,
+                            style={"height": "calc(100vh - 110px)", "display": "flex", "flexDirection": "column"}
+                        ),
+                        # Far Right: AI Assistant Placeholder
+                        dbc.Col(
+                            dbc.Card(
+                                [
+                                    dbc.CardHeader("AI Insights Assistant", style={"fontWeight": "600"}),
+                                    dbc.CardBody(
+                                        [
+                                            html.Div(
+                                                [
+                                                    html.Div(
+                                                        "Ask me anything about your experiment results or model performance.",
+                                                        style={"fontSize": "0.85rem", "color": "#6c757d", "marginBottom": "15px"}
+                                                    ),
+                                                    html.Div(
+                                                        style={
+                                                            "flex": "1",
+                                                            "backgroundColor": "#f8f9fa",
+                                                            "borderRadius": "5px",
+                                                            "border": "1px solid #dee2e6",
+                                                            "padding": "10px",
+                                                            "marginBottom": "15px",
+                                                            "overflowY": "auto"
+                                                        },
+                                                        children=[
+                                                            html.Div("System: Assistant is ready. (Module pending implementation)",
+                                                                     style={"fontSize": "0.8rem", "fontStyle": "italic", "color": "#adb5bd"})
+                                                        ]
+                                                    ),
+                                                ],
+                                                style={"display": "flex", "flexDirection": "column", "height": "calc(100% - 70px)"}
+                                            ),
+                                            dbc.InputGroup(
+                                                [
+                                                    dbc.Input(placeholder="Ask about your runs...", type="text", disabled=True),
+                                                    dbc.Button("Send", color="primary", disabled=True),
+                                                ]
+                                            )
+                                        ],
+                                        style={"display": "flex", "flexDirection": "column", "height": "100%", "padding": "15px"}
+                                    ),
+                                ],
+                                style={"height": "100%", "display": "flex", "flexDirection": "column"}
                             ),
-                        ],
-                        className="g-4"
-                    )
+                            width=2,
+                            style={"height": "calc(100vh - 110px)"}
+                        ),
+                    ],
+                    className="g-4"
+                )
+            ],
+            fluid=True,
+            style={"paddingTop": "20px", "height": "calc(100vh - 95px)", "overflow": "hidden"}
+        )
+
+    def datasets_layout():
+        card_style = {"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)"}
+
+        def var_table(rows):
+            """Build a compact Bootstrap table for variable descriptions."""
+            return dbc.Table(
+                [
+                    html.Thead(html.Tr([
+                        html.Th("Variável", style={"width": "15%"}),
+                        html.Th("Tipo", style={"width": "15%"}),
+                        html.Th("Descrição"),
+                        html.Th("Valores / Range", style={"width": "25%"}),
+                    ])),
+                    html.Tbody([
+                        html.Tr([html.Td(html.Code(r[0])), html.Td(r[1]), html.Td(r[2]), html.Td(r[3])])
+                        for r in rows
+                    ]),
                 ],
-                fluid=True,
-                style={"paddingTop": "20px", "height": "calc(100vh - 95px)"}
-            ),
-            footer
+                bordered=True, hover=True, responsive=True, size="sm",
+                style={"fontSize": "0.82rem"},
+            )
+
+        titanic_vars = [
+            ("pclass",      "Categórica", "Classe do bilhete",                      "1 = 1ª · 2 = 2ª · 3 = 3ª classe"),
+            ("sex",         "Categórica", "Gênero do passageiro",                   "male, female"),
+            ("age",         "Numérica",   "Idade em anos (contém nulos)",            "0.42 – 80"),
+            ("sibsp",       "Numérica",   "Nº de irmãos / cônjuges a bordo",        "0 – 8"),
+            ("parch",       "Numérica",   "Nº de pais / filhos a bordo",            "0 – 6"),
+            ("fare",        "Numérica",   "Tarifa paga pela passagem (£)",           "0 – 512"),
+            ("embarked",    "Categórica", "Porto de embarque",                       "C = Cherbourg · Q = Queenstown · S = Southampton"),
+            ("class",       "Categórica", "Classe como string (alias de pclass)",   "First, Second, Third"),
+            ("who",         "Categórica", "Categoria do passageiro",                "man, woman, child"),
+            ("adult_male",  "Booleana",   "Adulto do sexo masculino",               "True, False"),
+            ("deck",        "Categórica", "Deck do camarote (muitos nulos)",        "A, B, C, D, E, F, G"),
+            ("embark_town", "Categórica", "Cidade de embarque (alias de embarked)", "Cherbourg, Queenstown, Southampton"),
+            ("alone",       "Booleana",   "Passageiro viajou sozinho",              "True, False"),
+        ]
+
+        housing_vars = [
+            ("MedInc",      "Numérica", "Renda mediana dos residentes do bloco",      "0.5 – 15.0  (×$10 k)"),
+            ("HouseAge",    "Numérica", "Idade mediana das casas no bloco",           "1 – 52 anos"),
+            ("AveRooms",    "Numérica", "Média de cômodos por residência",            "0.8 – 141"),
+            ("AveBedrms",   "Numérica", "Média de quartos por residência",            "0.3 – 34"),
+            ("Population",  "Numérica", "Total de pessoas no bloco",                 "3 – 35 682"),
+            ("AveOccup",    "Numérica", "Média de ocupantes por residência",          "0.7 – 1 243"),
+            ("Latitude",    "Numérica", "Latitude geográfica do bloco",              "32.6 – 41.9 °N"),
+            ("Longitude",   "Numérica", "Longitude geográfica do bloco",             "−124.3 – −114.3 °W"),
+        ]
+
+        diabetes_vars = [
+            ("age",  "Numérica", "Idade do paciente (normalizada)",                  "−0.11 – 0.11"),
+            ("sex",  "Numérica", "Gênero (normalizado)",                             "−0.04 – 0.06"),
+            ("bmi",  "Numérica", "Índice de Massa Corporal (normalizado)",           "−0.09 – 0.18"),
+            ("bp",   "Numérica", "Pressão arterial média (normalizada)",             "−0.11 – 0.13"),
+            ("s1",   "Numérica", "Colesterol total — tc (normalizado)",              "−0.13 – 0.15"),
+            ("s2",   "Numérica", "LDL colesterol — ldl (normalizado)",               "−0.12 – 0.20"),
+            ("s3",   "Numérica", "HDL colesterol — hdl (normalizado)",               "−0.10 – 0.18"),
+            ("s4",   "Numérica", "Colesterol total / HDL — tch (normalizado)",       "−0.08 – 0.19"),
+            ("s5",   "Numérica", "Log do nível sérico — ltg (normalizado)",          "−0.13 – 0.13"),
+            ("s6",   "Numérica", "Glicose sérica — glu (normalizado)",               "−0.11 – 0.13"),
+        ]
+
+        return dbc.Container(
+            [
+                dbc.Row(
+                    dbc.Col([
+                        html.H2("Datasets", className="fw-bold mt-4 mb-1"),
+                        html.P(
+                            "Conheça os datasets disponíveis e planejados na plataforma — "
+                            "com a descrição de cada variável, target e métricas de avaliação.",
+                            className="text-muted mb-4",
+                        ),
+                    ])
+                ),
+
+                # ── Classificação ────────────────────────────────────────
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(
+                                    [
+                                        dbc.Badge("Disponível", color="success", className="me-2"),
+                                        html.Span("Classificação — Titanic", className="fw-bold fs-5"),
+                                    ],
+                                    style={"backgroundColor": "#eaf4fb", "borderBottom": "2px solid #2980b9"}
+                                ),
+                                dbc.CardBody([
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.H6("O que é?", className="text-primary fw-bold"),
+                                            html.P(
+                                                "Prever se um passageiro sobreviveu ao naufrágio do Titanic "
+                                                "(variável binária). Ideal para explorar classificação supervisionada.",
+                                            ),
+                                            html.H6("Resumo do dataset", className="text-primary fw-bold mt-3"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem([html.Strong("Registros: "), "891 passageiros"]),
+                                                dbc.ListGroupItem([html.Strong("Target: "), html.Code("survived"), " — 0 = não sobreviveu · 1 = sobreviveu"]),
+                                                dbc.ListGroupItem([html.Strong("Origem: "), "seaborn.load_dataset('titanic')"]),
+                                            ], flush=True, className="mb-3"),
+                                        ], md=4),
+                                        dbc.Col([
+                                            html.H6("Modelos Suportados", className="text-primary fw-bold"),
+                                            dbc.Row([
+                                                dbc.Col(dbc.Card(dbc.CardBody("Logistic Regression"), color="primary", outline=True, className="text-center mb-2")),
+                                                dbc.Col(dbc.Card(dbc.CardBody("Random Forest"), color="primary", outline=True, className="text-center mb-2")),
+                                            ], className="mb-3"),
+                                            html.H6("Métricas de Avaliação", className="text-primary fw-bold"),
+                                            html.Div([
+                                                dbc.Badge("Accuracy", color="primary", className="me-1 mb-1"),
+                                                dbc.Badge("Precision", color="primary", className="me-1 mb-1"),
+                                                dbc.Badge("Recall", color="primary", className="me-1 mb-1"),
+                                                dbc.Badge("F1-Score", color="primary", className="me-1 mb-1"),
+                                                dbc.Badge("ROC AUC", color="primary", className="me-1 mb-1"),
+                                            ]),
+                                        ], md=8),
+                                    ], className="mb-3"),
+                                    html.H6("Variáveis (features disponíveis para seleção)", className="text-primary fw-bold"),
+                                    var_table(titanic_vars),
+                                ]),
+                            ],
+                            style=card_style, className="mb-4",
+                        )
+                    )
+                ),
+
+                # ── Regressão ────────────────────────────────────────────
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(
+                                    [
+                                        dbc.Badge("Em breve", color="warning", text_color="dark", className="me-2"),
+                                        html.Span("Regressão", className="fw-bold fs-5"),
+                                    ],
+                                    style={"backgroundColor": "#fef9ec", "borderBottom": "2px solid #f39c12"}
+                                ),
+                                dbc.CardBody([
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.H6("O que é?", className="text-warning fw-bold"),
+                                            html.P(
+                                                "Prever um valor numérico contínuo. "
+                                                "O modelo aprende a estimar quantidades a partir das features.",
+                                            ),
+                                        ], md=4),
+                                        dbc.Col([
+                                            html.H6("Modelos Planejados", className="text-warning fw-bold"),
+                                            dbc.Row([
+                                                dbc.Col(dbc.Card(dbc.CardBody("Linear Regression"), color="warning", outline=True, className="text-center mb-2")),
+                                                dbc.Col(dbc.Card(dbc.CardBody("RF Regressor"), color="warning", outline=True, className="text-center mb-2")),
+                                            ], className="mb-2"),
+                                            html.H6("Métricas de Avaliação", className="text-warning fw-bold"),
+                                            html.Div([
+                                                dbc.Badge("MAE", color="warning", text_color="dark", className="me-1 mb-1"),
+                                                dbc.Badge("MSE", color="warning", text_color="dark", className="me-1 mb-1"),
+                                                dbc.Badge("RMSE", color="warning", text_color="dark", className="me-1 mb-1"),
+                                                dbc.Badge("R²", color="warning", text_color="dark", className="me-1 mb-1"),
+                                            ]),
+                                        ], md=8),
+                                    ], className="mb-4"),
+
+                                    # California Housing
+                                    html.H6(
+                                        [dbc.Badge("Planejado", color="secondary", className="me-2"), "California Housing — Previsão de preço de imóveis"],
+                                        className="fw-bold mb-1",
+                                    ),
+                                    html.P([
+                                        html.Strong("Target: "), html.Code("MedHouseVal"), " — valor mediano das casas do bloco (×$100 k)",
+                                        html.Span(" · ", className="text-muted"),
+                                        html.Strong("Registros: "), "20 640",
+                                    ], className="text-muted small mb-2"),
+                                    var_table(housing_vars),
+
+                                    html.Hr(),
+
+                                    # Diabetes
+                                    html.H6(
+                                        [dbc.Badge("Planejado", color="secondary", className="me-2"), "Diabetes — Progressão da doença"],
+                                        className="fw-bold mb-1 mt-3",
+                                    ),
+                                    html.P([
+                                        html.Strong("Target: "), "progressão da diabetes após 1 ano (0 – 346)",
+                                        html.Span(" · ", className="text-muted"),
+                                        html.Strong("Registros: "), "442 · todas as variáveis já normalizadas",
+                                    ], className="text-muted small mb-2"),
+                                    var_table(diabetes_vars),
+                                ]),
+                            ],
+                            style=card_style, className="mb-5",
+                        )
+                    )
+                ),
+            ],
+            fluid=True,
+            style={"paddingTop": "20px", "paddingBottom": "60px"},
+        )
+
+    def about_layout():
+        step_card_style = {"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)", "textAlign": "center"}
+        return dbc.Container(
+            [
+                dbc.Row(
+                    dbc.Col([
+                        html.H2("Sobre o ML Playground", className="fw-bold mt-4 mb-1"),
+                        html.P(
+                            "Uma plataforma interativa para exploração e experimentação com Machine Learning.",
+                            className="text-muted mb-4 fs-5",
+                        ),
+                    ])
+                ),
+                # Hero description
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            dbc.CardBody([
+                                html.H4("O que é o ML Playground?", className="mb-3"),
+                                html.P(
+                                    "O ML Playground é uma plataforma web que permite configurar, executar e comparar "
+                                    "experimentos de Machine Learning de forma visual e interativa — sem escrever código. "
+                                    "O objetivo é acelerar o entendimento de como diferentes modelos, hiperparâmetros e "
+                                    "estratégias de pré-processamento impactam os resultados.",
+                                    className="lead mb-0",
+                                ),
+                            ]),
+                            style={"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)", "borderLeft": "4px solid #2980b9"},
+                            className="mb-4",
+                        )
+                    )
+                ),
+                # How it works — 4 steps
+                dbc.Row(
+                    [
+                        dbc.Col(
+                            dbc.Card(dbc.CardBody([
+                                html.H5("1. Configure", className="fw-bold"),
+                                html.P("Selecione features, modelo, hiperparâmetros, scaling e proporção de treino/teste no painel lateral."),
+                            ]), style=step_card_style),
+                            md=3, className="mb-3",
+                        ),
+                        dbc.Col(
+                            dbc.Card(dbc.CardBody([
+                                html.H5("2. Execute", className="fw-bold"),
+                                html.P("Clique em 'Run Experiment'. O pipeline é montado, treinado e avaliado automaticamente."),
+                            ]), style=step_card_style),
+                            md=3, className="mb-3",
+                        ),
+                        dbc.Col(
+                            dbc.Card(dbc.CardBody([
+                                html.H5("3. Rastreie", className="fw-bold"),
+                                html.P("Cada experimento é salvo no MLflow com parâmetros, métricas e o modelo treinado."),
+                            ]), style=step_card_style),
+                            md=3, className="mb-3",
+                        ),
+                        dbc.Col(
+                            dbc.Card(dbc.CardBody([
+                                html.H5("4. Compare", className="fw-bold"),
+                                html.P("Selecione runs na tabela e visualize comparações em gráficos de radar e barras."),
+                            ]), style=step_card_style),
+                            md=3, className="mb-3",
+                        ),
+                    ],
+                    className="mb-4",
+                ),
+                # Tech stack
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(html.Span("Stack Tecnológico", className="fw-bold")),
+                                dbc.CardBody(
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.H6("Frontend & Visualização", className="text-muted fw-bold"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem("Dash (Python web framework)"),
+                                                dbc.ListGroupItem("Dash Bootstrap Components"),
+                                                dbc.ListGroupItem("Plotly (gráficos interativos)"),
+                                            ], flush=True),
+                                        ], md=4),
+                                        dbc.Col([
+                                            html.H6("Machine Learning", className="text-muted fw-bold"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem("scikit-learn (modelos e pipelines)"),
+                                                dbc.ListGroupItem("pandas & numpy (dados)"),
+                                                dbc.ListGroupItem("seaborn (datasets)"),
+                                            ], flush=True),
+                                        ], md=4),
+                                        dbc.Col([
+                                            html.H6("Rastreamento & Deploy", className="text-muted fw-bold"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem("MLflow (experiment tracking)"),
+                                                dbc.ListGroupItem("SQLite (backend local)"),
+                                                dbc.ListGroupItem("Docker (containerização)"),
+                                            ], flush=True),
+                                        ], md=4),
+                                    ])
+                                ),
+                            ],
+                            style={"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)"},
+                            className="mb-4",
+                        )
+                    )
+                ),
+                # Roadmap
+                dbc.Row(
+                    dbc.Col(
+                        dbc.Card(
+                            [
+                                dbc.CardHeader(html.Span("Roadmap", className="fw-bold")),
+                                dbc.CardBody(
+                                    dbc.Row([
+                                        dbc.Col([
+                                            html.H6("Em desenvolvimento", className="text-muted fw-bold"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "Dataset de Regressão"]),
+                                                dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "AI Insights Assistant"]),
+                                                dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "Upload de CSV customizado"]),
+                                            ], flush=True),
+                                        ], md=6),
+                                        dbc.Col([
+                                            html.H6("Planejado", className="text-muted fw-bold"),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "Mais modelos (XGBoost, SVM)"]),
+                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "Exportação de relatórios"]),
+                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "AutoML básico"]),
+                                            ], flush=True),
+                                        ], md=6),
+                                    ])
+                                ),
+                            ],
+                            style={"border": "none", "boxShadow": "0 2px 8px rgba(0,0,0,0.08)"},
+                            className="mb-5",
+                        )
+                    )
+                ),
+            ],
+            fluid=True,
+            style={"paddingTop": "20px", "paddingBottom": "60px"},
+        )
+
+    # ── App layout (multi-page) ────────────────────────────────────────────────
+    app.layout = html.Div(
+        [
+            html.Div(id="dummy-output", style={"display": "none"}),
+            dcc.Location(id="url", refresh=False),
+            navbar,
+            html.Div(id="page-content"),
+            footer,
         ],
         style={
-            "height": "100vh",
             "backgroundColor": "#f0f2f5",
-            "overflow": "hidden"
+            "minHeight": "100vh",
         }
     )
+
+    # ── Callbacks ─────────────────────────────────────────────────────────────
+
+    @app.callback(Output("page-content", "children"), Input("url", "pathname"))
+    def render_page_content(pathname):
+        if pathname == "/datasets":
+            return datasets_layout()
+        elif pathname == "/sobre":
+            return about_layout()
+        return home_layout()
 
     @app.callback(
         Output("feature-select", "options"),
@@ -344,7 +685,6 @@ def serve_app() -> dash.Dash:
         Input("feature-select", "id"),
     )
     def populate_features(_):
-        # kept for compatibility: return the same options/value already set at layout
         return _feature_opts, _feature_default
 
     @app.callback(Output("hyperparams-area", "children"), Input("model-select", "value"))
@@ -378,9 +718,9 @@ def serve_app() -> dash.Dash:
         ctx = callback_context
         if not ctx.triggered:
             return no_update, no_update
-            
+
         triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        
+
         if triggered_id == "delete-btn":
             from experiments.tracker import delete_all_runs
             try:
@@ -389,24 +729,21 @@ def serve_app() -> dash.Dash:
                 return html.Div([f"Deleted {count} runs."]), runs.to_dict("records")
             except Exception as e:
                 return html.Div([f"Delete failed: {e}"], style={"color": "red"}), []
-                
+
         # Handle Run Action
         params = {}
         poly_enabled = "enabled" in (poly_features or [])
         test_size_float = float(test_size) / 100.0
 
-        # helper to extract slider value from children (recursive)
         def _extract_val(children, target_id, default=None):
             if not children:
                 return default
             items = children if isinstance(children, list) else [children]
             for it in items:
                 try:
-                    # Dash component dict structure
                     props = it.get("props", {})
                     if props.get("id") == target_id:
                         return props.get("value", default)
-                    # check nested children
                     nested = props.get("children")
                     if nested:
                         v = _extract_val(nested, target_id, None)
@@ -426,10 +763,10 @@ def serve_app() -> dash.Dash:
             params["max_depth"] = int(d_val if d_val is not None else 6)
 
         run_id, metrics = run_experiment_and_log(
-            features or [], 
-            scaling, 
-            model, 
-            params, 
+            features or [],
+            scaling,
+            model,
+            params,
             run_name=run_name,
             test_size=test_size_float,
             class_weight=class_weight,
@@ -440,7 +777,6 @@ def serve_app() -> dash.Dash:
         except Exception:
             data = []
         return html.Div([f"Last run: {run_id}"]), data
-
 
     @app.callback(
         Output("bottom-chart", "figure"),
@@ -453,15 +789,11 @@ def serve_app() -> dash.Dash:
         if df.empty:
             return px.line_polar()
 
-        # prefer bottom selector
         chart_type = chart_select_bottom or "radar"
 
-        # List of internal metric column names matching the MLflow data structure
         internal_metrics = ["metric_accuracy", "metric_precision", "metric_recall", "metric_f1", "metric_roc_auc"]
-        # Human readable names for the chart axes
         display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
 
-        # filter for selected rows IF they exist, otherwise show top 3
         if selected_rows:
             sel = df.iloc[selected_rows]
         else:
@@ -472,33 +804,30 @@ def serve_app() -> dash.Dash:
                 sel = df.head(min(3, len(df)))
 
         if chart_type == "bar_f1":
-            # safe bar: if f1 missing, use 0.0
             y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
             if y_col not in df.columns:
                 df[y_col] = 0.0
-            
+
             plot_df = sel if selected_rows else df
-            fig = px.bar(plot_df.sort_values(y_col, ascending=False) if y_col in plot_df.columns else plot_df, 
-                         x="name" if "name" in plot_df.columns else plot_df.index, 
-                         y=y_col, color="model" if "model" in plot_df.columns else None, 
+            fig = px.bar(plot_df.sort_values(y_col, ascending=False) if y_col in plot_df.columns else plot_df,
+                         x="name" if "name" in plot_df.columns else plot_df.index,
+                         y=y_col, color="model" if "model" in plot_df.columns else None,
                          title="F1 by run")
             return fig
 
-        # default: radar chart
         available_internal = [m for m in internal_metrics if m in df.columns]
         available_display = [display_metrics[internal_metrics.index(m)] for m in available_internal]
-        
+
         if not available_internal:
             return px.line_polar()
 
         fig = px.line_polar()
         for _, r in sel.iterrows():
             values = [float(r.get(m, 0) or 0) for m in available_internal]
-            # Use name if available for legend
             label = r.get("name") or r.get("run_name") or r.get("run_id") or "Run"
-            fig.add_scatterpolar(r=values + [values[0]], theta=available_display + [available_display[0]], 
+            fig.add_scatterpolar(r=values + [values[0]], theta=available_display + [available_display[0]],
                                  name=str(label), fill="toself")
-        
+
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
@@ -511,586 +840,4 @@ def serve_app() -> dash.Dash:
 
 if __name__ == "__main__":
     dash_app = serve_app()
-    # use `run` (newer Dash) instead of deprecated `run_server`
     dash_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8050)), debug=True)
-"""ML Experiment Playground — ponto de entrada da aplicação Dash.
-
-Execute a partir da raiz do projeto::
-
-    python app/app.py
-
-Depois abra http://localhost:8050 no navegador.
-"""
-
-import sys
-from pathlib import Path
-
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(_PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(_PROJECT_ROOT))
-
-import mlflow
-import dash
-import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
-import pandas as pd
-from dash import Input, Output, State, dash_table, dcc, html
-
-from app.components import sidebar
-from experiments.tracker import (
-    delete_all_runs,
-    list_runs,
-    load_roc_data,
-    log_artifact_dict,
-    log_metrics,
-    log_model,
-    log_params,
-    start_run,
-)
-from ml.pipeline import build_pipeline
-from ml.train import get_available_features, load_titanic, train_and_evaluate
-
-# ── Dataset carregado uma vez na inicialização ────────────────────────────────
-DF = load_titanic()
-FEATURES = get_available_features(DF)
-
-# ── Inicialização do app ───────────────────────────────────────────────────────
-app = dash.Dash(
-    __name__,
-    external_stylesheets=[dbc.themes.BOOTSTRAP],
-    title="ML Playground",
-)
-
-# ── Componentes estáticos ─────────────────────────────────────────────────────
-
-_HEADER = html.Header(
-    dbc.Container(
-        dbc.Row(
-            [
-                dbc.Col(
-                    [
-                        html.H3(
-                            "Playground de Experimentos ML",
-                            className="mb-0 fw-bold text-white",
-                        ),
-                        html.Small(
-                            "Compare modelos de classificação · Dataset Titanic · MLflow local",
-                            className="text-white-50",
-                        ),
-                    ],
-                    width=8,
-                ),
-                dbc.Col(
-                    [
-                        dbc.Badge("scikit-learn", color="light", text_color="dark", className="me-1"),
-                        dbc.Badge("MLflow", color="light", text_color="dark", className="me-1"),
-                        dbc.Badge("Dash + Plotly", color="light", text_color="dark"),
-                    ],
-                    width=4,
-                    className="d-flex align-items-center justify-content-end",
-                ),
-            ],
-            align="center",
-        ),
-        fluid=True,
-    ),
-    className="py-3",
-    style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"},
-)
-
-_FOOTER = html.Footer(
-    dbc.Container(
-        [
-            html.Hr(className="mb-2"),
-            html.P(
-                "© 2026 ML Playground · Construído com Dash, Plotly, scikit-learn e MLflow",
-                className="text-center text-muted small mb-0",
-            ),
-        ],
-        fluid=True,
-    ),
-    className="py-3 bg-light mt-4",
-)
-
-# ── Layout ─────────────────────────────────────────────────────────────────────
-app.layout = dbc.Container(
-    [
-        _HEADER,
-
-        # Conteúdo principal: sidebar + painel de resultados
-        dbc.Row(
-            [
-                sidebar(FEATURES),
-
-                dbc.Col(
-                    [
-                        # ── Tabela de corridas ────────────────────────────
-                        dbc.Row(
-                            [
-                                dbc.Col(
-                                    html.H5("Corridas de Experimento"),
-                                    width="auto",
-                                ),
-                                dbc.Col(
-                                    html.Small(
-                                        "Selecione linhas para comparar nos gráficos.",
-                                        className="text-muted",
-                                    ),
-                                    width="auto",
-                                    className="align-self-center ms-2",
-                                ),
-                                dbc.Col(
-                                    dbc.Button(
-                                        "Apagar Todas as Corridas",
-                                        id="delete-btn",
-                                        color="danger",
-                                        outline=True,
-                                        size="sm",
-                                        n_clicks=0,
-                                    ),
-                                    width="auto",
-                                    className="ms-auto",
-                                ),
-                            ],
-                            className="mb-2 align-items-center",
-                        ),
-                        dash_table.DataTable(
-                            id="runs-table",
-                            columns=[],
-                            data=[],
-                            row_selectable="multi",
-                            selected_rows=[],
-                            page_size=10,
-                            filter_action="native",
-                            sort_action="native",
-                            style_table={"overflowX": "auto"},
-                            style_cell={
-                                "fontSize": 12,
-                                "padding": "6px 10px",
-                                "whiteSpace": "normal",
-                                "textAlign": "left",
-                            },
-                            style_header={
-                                "fontWeight": "bold",
-                                "backgroundColor": "#f8f9fa",
-                                "textAlign": "left",
-                            },
-                            style_data_conditional=[
-                                {
-                                    "if": {"row_index": "odd"},
-                                    "backgroundColor": "#fafafa",
-                                },
-                                {
-                                    "if": {"state": "selected"},
-                                    "backgroundColor": "#e8f0fe",
-                                    "border": "1px solid #4285f4",
-                                },
-                            ],
-                        ),
-
-                        # ── Seção de gráficos ─────────────────────────────
-                        html.H5("Comparação de Corridas", className="mt-4 mb-2"),
-                        dbc.Row(
-                            [
-                                # 20 % — seletor de tipo de gráfico
-                                dbc.Col(
-                                    [
-                                        html.P(
-                                            "Tipo de Gráfico",
-                                            className="fw-semibold mb-2 small text-uppercase text-muted",
-                                        ),
-                                        dbc.RadioItems(
-                                            id="chart-type",
-                                            options=[
-                                                {
-                                                    "label": html.Span(
-                                                        ["Radar", html.Br(),
-                                                         html.Small("visão holística", className="text-muted")],
-                                                    ),
-                                                    "value": "radar",
-                                                },
-                                                {
-                                                    "label": html.Span(
-                                                        ["Barras", html.Br(),
-                                                         html.Small("métricas lado a lado", className="text-muted")],
-                                                    ),
-                                                    "value": "barras",
-                                                },
-                                                {
-                                                    "label": html.Span(
-                                                        ["Curva ROC", html.Br(),
-                                                         html.Small("TPR × FPR", className="text-muted")],
-                                                    ),
-                                                    "value": "roc",
-                                                },
-                                            ],
-                                            value="radar",
-                                            className="chart-selector",
-                                        ),
-                                    ],
-                                    width=2,
-                                    className="border-end pe-3",
-                                ),
-
-                                # 80 % — área do gráfico
-                                dbc.Col(
-                                    dcc.Graph(
-                                        id="main-chart",
-                                        style={"height": "420px"},
-                                        config={"displayModeBar": True},
-                                    ),
-                                    width=10,
-                                ),
-                            ],
-                            className="mt-1",
-                        ),
-                    ],
-                    width=9,
-                    className="p-3",
-                ),
-            ]
-        ),
-
-        _FOOTER,
-
-        # ── Componentes ocultos ───────────────────────────────────────────
-        dcc.Store(id="experiment-store", data=0),
-        dcc.ConfirmDialog(
-            id="confirm-delete",
-            message="Apagar todas as corridas? Esta ação não pode ser desfeita.",
-        ),
-    ],
-    fluid=True,
-    className="px-0",
-)
-
-# ── Configuração das colunas da tabela ────────────────────────────────────────
-_DISPLAY_COLS = [
-    "run_name", "start_time",
-    "model", "scaler", "n_features",
-    "C", "n_estimators", "max_depth",
-    "metric_accuracy", "metric_precision", "metric_recall",
-    "metric_f1", "metric_roc_auc",
-]
-_COL_LABELS: dict[str, str] = {
-    "run_name": "Corrida",
-    "start_time": "Hora",
-    "model": "Modelo",
-    "scaler": "Normaliz.",
-    "n_features": "# Var.",
-    "C": "C",
-    "n_estimators": "Árvores",
-    "max_depth": "Profund.",
-    "metric_accuracy": "Acurácia",
-    "metric_precision": "Precisão",
-    "metric_recall": "Recall",
-    "metric_f1": "F1",
-    "metric_roc_auc": "ROC AUC",
-}
-_METRIC_COLS = [
-    "metric_accuracy", "metric_precision",
-    "metric_recall", "metric_f1", "metric_roc_auc",
-]
-_METRIC_LABELS_PT = ["Acurácia", "Precisão", "Recall", "F1", "ROC AUC"]
-
-
-def _format_table(runs_df: pd.DataFrame) -> tuple[list[dict], list[dict]]:
-    """Converte o DataFrame de corridas em registros compatíveis com DataTable.
-
-    O campo ``run_id`` é incluído nos dados (mas não nas colunas exibidas)
-    para que callbacks possam carregar artefatos por ID de corrida.
-    """
-    if runs_df.empty:
-        return [], []
-
-    available = [c for c in _DISPLAY_COLS if c in runs_df.columns]
-    display = runs_df[available].copy()
-
-    # Inclui run_id nos dados sem exibi-lo na tabela
-    if "run_id" in runs_df.columns:
-        display["run_id"] = runs_df["run_id"].values
-
-    if "start_time" in display.columns:
-        display["start_time"] = display["start_time"].dt.strftime("%d/%m %H:%M")
-
-    for col in _METRIC_COLS:
-        if col in display.columns:
-            display[col] = pd.to_numeric(display[col], errors="coerce").round(4)
-
-    columns = [{"name": _COL_LABELS.get(c, c), "id": c} for c in available]
-    return display.to_dict("records"), columns
-
-
-def _empty_chart(message: str) -> go.Figure:
-    """Retorna uma figura vazia com mensagem centralizada."""
-    fig = go.Figure()
-    fig.update_layout(
-        polar=dict(radialaxis=dict(range=[0, 1])),
-        annotations=[{
-            "text": message,
-            "showarrow": False,
-            "font": {"size": 14, "color": "#888"},
-            "x": 0.5, "y": 0.5, "xref": "paper", "yref": "paper",
-        }],
-        margin=dict(l=40, r=40, t=40, b=40),
-    )
-    return fig
-
-
-# ── Callbacks ──────────────────────────────────────────────────────────────────
-
-@app.callback(
-    Output("lr-params", "style"),
-    Output("rf-params", "style"),
-    Input("model-selector", "value"),
-)
-def toggle_hyperparams(model: str) -> tuple[dict, dict]:
-    """Exibe/oculta o painel de hiperparâmetros do modelo selecionado."""
-    show: dict = {}
-    hide: dict = {"display": "none"}
-    return (show, hide) if model == "logistic_regression" else (hide, show)
-
-
-@app.callback(
-    Output("experiment-store", "data"),
-    Output("run-status", "children"),
-    Input("run-btn", "n_clicks"),
-    State("feature-selector", "value"),
-    State("scaler-selector", "value"),
-    State("model-selector", "value"),
-    State("lr-C", "value"),
-    State("rf-n-estimators", "value"),
-    State("rf-max-depth", "value"),
-    State("run-name", "value"),
-    State("experiment-store", "data"),
-    prevent_initial_call=True,
-)
-def run_experiment(
-    _n_clicks: int,
-    features: list[str] | None,
-    scaler: str,
-    model: str,
-    lr_C: float,
-    rf_n_estimators: int,
-    rf_max_depth: int,
-    run_name: str | None,
-    store_count: int,
-) -> tuple[int, object]:
-    """Constrói e avalia um pipeline, depois registra a corrida no MLflow."""
-    if not features:
-        return store_count, dbc.Alert(
-            "Selecione pelo menos uma variável antes de executar.",
-            color="warning", className="py-1 mt-1",
-        )
-
-    try:
-        pipeline = build_pipeline(
-            model_type=model,
-            scaler_type=scaler,
-            lr_C=float(lr_C or 1.0),
-            rf_n_estimators=int(rf_n_estimators or 100),
-            rf_max_depth=int(rf_max_depth or 0),
-        )
-
-        metrics, fitted_pipeline, roc_data = train_and_evaluate(pipeline, DF, features)
-
-        params: dict = {
-            "model": model,
-            "scaler": scaler,
-            "features": ",".join(features),
-            "n_features": len(features),
-        }
-        if model == "logistic_regression":
-            params["C"] = lr_C
-        else:
-            params["n_estimators"] = rf_n_estimators
-            params["max_depth"] = (
-                "ilimitada" if int(rf_max_depth or 0) <= 0 else rf_max_depth
-            )
-
-        with start_run(run_name=run_name or None):
-            log_params(params)
-            log_metrics(metrics)
-            log_model(fitted_pipeline)
-            log_artifact_dict(roc_data, "roc_data.json")
-
-        status = dbc.Alert(
-            [
-                html.Strong("Corrida concluída! "),
-                f"Acurácia={metrics['accuracy']:.4f}  "
-                f"F1={metrics['f1']:.4f}  "
-                f"ROC AUC={metrics['roc_auc']:.4f}",
-            ],
-            color="success", className="py-1 mt-1",
-        )
-        return (store_count or 0) + 1, status
-
-    except Exception as exc:  # noqa: BLE001
-        return store_count, dbc.Alert(
-            f"Erro: {exc}", color="danger", className="py-1 mt-1",
-        )
-
-
-@app.callback(
-    Output("runs-table", "data"),
-    Output("runs-table", "columns"),
-    Input("experiment-store", "data"),
-)
-def refresh_table(_store_count: int) -> tuple[list[dict], list[dict]]:
-    """Recarrega a tabela do MLflow sempre que o store de experimentos muda.
-
-    Também dispara no carregamento da página para exibir corridas existentes.
-    """
-    return _format_table(list_runs())
-
-
-@app.callback(
-    Output("main-chart", "figure"),
-    Input("chart-type", "value"),
-    Input("runs-table", "selected_rows"),
-    State("runs-table", "data"),
-)
-def update_chart(
-    chart_type: str,
-    selected_rows: list[int],
-    table_data: list[dict],
-) -> go.Figure:
-    """Renderiza o gráfico selecionado para as corridas marcadas na tabela."""
-    if not selected_rows or not table_data:
-        return _empty_chart("Selecione corridas na tabela acima para comparar")
-
-    if chart_type == "radar":
-        return _build_radar(selected_rows, table_data)
-    if chart_type == "barras":
-        return _build_bar(selected_rows, table_data)
-    if chart_type == "roc":
-        return _build_roc(selected_rows, table_data)
-    return _empty_chart("Tipo de gráfico desconhecido")
-
-
-def _build_radar(selected_rows: list[int], table_data: list[dict]) -> go.Figure:
-    """Gráfico de radar — uma teia por corrida selecionada."""
-    fig = go.Figure()
-    for idx in selected_rows:
-        row = table_data[idx]
-        values = [float(row.get(m) or 0) for m in _METRIC_COLS]
-        closed = values + [values[0]]
-        labels = _METRIC_LABELS_PT + [_METRIC_LABELS_PT[0]]
-        fig.add_trace(go.Scatterpolar(
-            r=closed,
-            theta=labels,
-            fill="toself",
-            name=row.get("run_name", f"run-{idx}"),
-            opacity=0.75,
-        ))
-    fig.update_layout(
-        polar=dict(radialaxis=dict(range=[0, 1], visible=True, tickformat=".2f")),
-        showlegend=True,
-        legend=dict(x=1.05, y=1.0),
-        margin=dict(l=40, r=120, t=40, b=40),
-    )
-    return fig
-
-
-def _build_bar(selected_rows: list[int], table_data: list[dict]) -> go.Figure:
-    """Gráfico de barras agrupadas — métricas × corridas."""
-    fig = go.Figure()
-    for idx in selected_rows:
-        row = table_data[idx]
-        values = [float(row.get(m) or 0) for m in _METRIC_COLS]
-        fig.add_trace(go.Bar(
-            name=row.get("run_name", f"run-{idx}"),
-            x=_METRIC_LABELS_PT,
-            y=values,
-            text=[f"{v:.3f}" for v in values],
-            textposition="outside",
-        ))
-    fig.update_layout(
-        barmode="group",
-        yaxis=dict(range=[0, 1.12], title="Valor"),
-        xaxis_title="Métrica",
-        showlegend=True,
-        legend=dict(x=1.0, y=1.0),
-        margin=dict(l=40, r=120, t=40, b=40),
-    )
-    return fig
-
-
-def _build_roc(selected_rows: list[int], table_data: list[dict]) -> go.Figure:
-    """Curva ROC — TPR × FPR por corrida, com AUC na legenda."""
-    fig = go.Figure()
-    any_data = False
-
-    for idx in selected_rows:
-        row = table_data[idx]
-        run_id = row.get("run_id")
-        if not run_id:
-            continue
-        roc = load_roc_data(run_id)
-        if roc is None:
-            continue
-        auc_val = row.get("metric_roc_auc", "?")
-        fig.add_trace(go.Scatter(
-            x=roc["fpr"],
-            y=roc["tpr"],
-            mode="lines",
-            name=f"{row.get('run_name', f'run-{idx}')}  (AUC={auc_val})",
-        ))
-        any_data = True
-
-    if not any_data:
-        return _empty_chart(
-            "Curva ROC não disponível para as corridas selecionadas.\n"
-            "Execute um novo experimento para gerar os dados."
-        )
-
-    # Linha de referência aleatória
-    fig.add_trace(go.Scatter(
-        x=[0, 1], y=[0, 1],
-        mode="lines",
-        line=dict(dash="dash", color="gray", width=1),
-        name="Aleatório",
-        showlegend=False,
-    ))
-    fig.update_layout(
-        xaxis=dict(title="Taxa de Falso Positivo (FPR)", range=[0, 1]),
-        yaxis=dict(title="Taxa de Verdadeiro Positivo (TPR)", range=[0, 1.02]),
-        showlegend=True,
-        legend=dict(x=0.55, y=0.08),
-        margin=dict(l=50, r=40, t=40, b=50),
-    )
-    return fig
-
-
-@app.callback(
-    Output("confirm-delete", "displayed"),
-    Input("delete-btn", "n_clicks"),
-    prevent_initial_call=True,
-)
-def show_delete_confirm(_n_clicks: int) -> bool:
-    """Abre o diálogo de confirmação ao clicar em 'Apagar Todas as Corridas'."""
-    return True
-
-
-@app.callback(
-    Output("experiment-store", "data", allow_duplicate=True),
-    Output("run-status", "children", allow_duplicate=True),
-    Input("confirm-delete", "submit_n_clicks"),
-    State("experiment-store", "data"),
-    prevent_initial_call=True,
-)
-def handle_delete(submit_n_clicks: int | None, store_count: int) -> tuple[int, object]:
-    """Apaga todas as corridas do MLflow após confirmação do usuário."""
-    if not submit_n_clicks:
-        return dash.no_update, dash.no_update
-
-    n_deleted = delete_all_runs()
-    return (store_count or 0) + 1, dbc.Alert(
-        f"{n_deleted} corrida(s) apagada(s).",
-        color="info", className="py-1 mt-1",
-    )
-
-
-# ── Ponto de entrada ───────────────────────────────────────────────────────────
-if __name__ == "__main__":
-    app.run(debug=True, port=8050)
