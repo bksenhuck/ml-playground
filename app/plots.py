@@ -25,7 +25,9 @@ from sklearn.model_selection import train_test_split
 
 # ── MLflow setup ──────────────────────────────────────────────────────────────
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_TRACKING_URI = "sqlite:///" + (_PROJECT_ROOT / "mlflow.db").as_posix()
+_TRACKING_URI = (
+    "sqlite:///" + (_PROJECT_ROOT / "mlflow.db").as_posix()
+)
 
 
 def _setup_mlflow() -> None:
@@ -41,10 +43,11 @@ def _load_model(run_id: str):
 
 
 def _reconstruct_test_data(run_row: dict):
-    """Recreate (X_test, y_test, feature_list) using the params stored in MLflow.
+    """Recreate (X_test, y_test, feature_list) from params in MLflow.
 
-    Mirrors the preprocessing in ml/train.py::_prepare_Xy so the split is
-    byte-for-byte identical (random_state=42, no stratify).
+    Must mirror train.py::run_training exactly:
+    - same random_state=42, same stratify=y
+    - no manual imputation (pipeline handles it)
     """
     features_str = str(run_row.get("features", "") or "")
     features = [f.strip() for f in features_str.split(",") if f.strip()]
@@ -57,23 +60,19 @@ def _reconstruct_test_data(run_row: dict):
     df = df.dropna(subset=["survived"])
 
     X = df[features].copy()
-    for col in X.columns:
-        if isinstance(X[col].dtype, pd.CategoricalDtype):
-            if "missing" not in X[col].cat.categories:
-                X[col] = X[col].cat.add_categories("missing")
-            X[col] = X[col].fillna("missing")
-        elif X[col].dtype.name == "object":
-            X[col] = X[col].fillna("missing")
-        else:
-            X[col] = X[col].fillna(X[col].median())
-
     y = df["survived"].astype(int)
-    _, X_test, _, y_test = train_test_split(X, y, test_size=test_size, random_state=42)
+    _, X_test, _, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
+    )
     return X_test, y_test, features
 
 
 def _run_label(row: dict) -> str:
-    return str(row.get("run_name") or row.get("name") or str(row.get("run_id", ""))[:8])
+    return str(
+        row.get("run_name")
+        or row.get("name")
+        or str(row.get("run_id", ""))[:8]
+    )
 
 
 def _empty_fig(message: str = "No data") -> go.Figure:
@@ -84,12 +83,16 @@ def _empty_fig(message: str = "No data") -> go.Figure:
         showarrow=False,
         font={"size": 13, "color": "#6c757d"},
     )
-    fig.update_layout(xaxis={"visible": False}, yaxis={"visible": False}, margin={"t": 30})
+    fig.update_layout(
+        xaxis={"visible": False},
+        yaxis={"visible": False},
+        margin={"t": 30},
+    )
     return fig
 
 
 def _clean_feat_name(name: str) -> str:
-    """Strip ColumnTransformer prefixes like 'num__', 'cat__' for readability."""
+    """Strip ColumnTransformer prefixes like 'num__', 'cat__'."""
     for prefix in ("num__poly__", "num__", "cat__"):
         if name.startswith(prefix):
             name = name[len(prefix):]
@@ -97,7 +100,16 @@ def _clean_feat_name(name: str) -> str:
     return name
 
 
-# ── Plot functions ─────────────────────────────────────────────────────────────
+# ── Shared layout constants ───────────────────────────────────────────────────
+_LEGEND = {
+    "orientation": "v",
+    "x": 1.02, "xanchor": "left",
+    "y": 1,    "yanchor": "top",
+}
+_MARGIN = {"t": 15, "b": 40, "l": 50, "r": 150}
+
+
+# ── Plot functions ────────────────────────────────────────────────────────────
 
 def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
     """Multi-run ROC curve overlay."""
@@ -105,7 +117,6 @@ def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
         return _empty_fig("No runs selected")
 
     fig = go.Figure()
-    # Random-classifier diagonal
     fig.add_trace(go.Scatter(
         x=[0, 1], y=[0, 1], mode="lines",
         line={"dash": "dash", "color": "lightgray", "width": 1},
@@ -130,10 +141,12 @@ def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
             continue
 
     fig.update_layout(
-        title="ROC Curve",
-        xaxis_title="False Positive Rate", yaxis_title="True Positive Rate",
-        xaxis={"range": [0, 1]}, yaxis={"range": [0, 1]},
-        legend={"orientation": "h", "y": -0.2},
+        xaxis_title="False Positive Rate",
+        yaxis_title="True Positive Rate",
+        xaxis={"range": [0, 1]},
+        yaxis={"range": [0, 1]},
+        legend=_LEGEND,
+        margin=_MARGIN,
     )
     return fig
 
@@ -162,16 +175,18 @@ def plot_pr_curve(runs_data: List[dict]) -> go.Figure:
             continue
 
     fig.update_layout(
-        title="Precision–Recall Curve",
-        xaxis_title="Recall", yaxis_title="Precision",
-        xaxis={"range": [0, 1]}, yaxis={"range": [0, 1]},
-        legend={"orientation": "h", "y": -0.2},
+        xaxis_title="Recall",
+        yaxis_title="Precision",
+        xaxis={"range": [0, 1]},
+        yaxis={"range": [0, 1]},
+        legend=_LEGEND,
+        margin=_MARGIN,
     )
     return fig
 
 
 def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
-    """Confusion matrix for the first selected run (normalized + raw counts)."""
+    """Confusion matrix for the first selected run."""
     valid = [r for r in runs_data if r.get("run_id")]
     if not valid:
         return _empty_fig("No runs selected")
@@ -198,8 +213,9 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
             zmin=0, zmax=1,
         ))
         fig.update_layout(
-            title=f"Confusion Matrix — {_run_label(row)}",
-            xaxis_title="Predicted", yaxis_title="Actual",
+            xaxis_title="Predicted",
+            yaxis_title="Actual",
+            margin=_MARGIN,
         )
         return fig
     except Exception as e:
@@ -207,7 +223,7 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
 
 
 def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
-    """Feature importance (RF) or |coefficient| (LogReg) for selected runs."""
+    """Feature importance (RF) or |coef| (LogReg) for selected runs."""
     valid = [r for r in runs_data if r.get("run_id")]
     if not valid:
         return _empty_fig("No runs selected")
@@ -219,24 +235,26 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
         run_id = row["run_id"]
         try:
             model = _load_model(run_id)
-            _, _, _ = _reconstruct_test_data(row)
+            _reconstruct_test_data(row)
 
             clf = model.named_steps["clf"]
             preprocessor = model.named_steps["preproc"]
 
-            # Get feature names from the preprocessor
             try:
                 raw_names = preprocessor.get_feature_names_out()
-                feat_names = np.array([_clean_feat_name(n) for n in raw_names])
+                feat_names = np.array(
+                    [_clean_feat_name(n) for n in raw_names]
+                )
             except Exception:
                 n_feats = (
                     len(clf.feature_importances_)
                     if hasattr(clf, "feature_importances_")
                     else len(clf.coef_[0])
                 )
-                feat_names = np.array([f"feat_{i}" for i in range(n_feats)])
+                feat_names = np.array(
+                    [f"feat_{i}" for i in range(n_feats)]
+                )
 
-            # Importances: RF uses feature_importances_, LogReg uses |coef_|
             if hasattr(clf, "feature_importances_"):
                 importances = clf.feature_importances_
             elif hasattr(clf, "coef_"):
@@ -258,14 +276,16 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
             continue
 
     if not any_plotted:
-        return _empty_fig("Could not compute feature importance for selected runs")
+        return _empty_fig(
+            "Could not compute feature importance for selected runs"
+        )
 
     fig.update_layout(
-        title="Feature Importance (top 15)",
         xaxis_title="Importance / |Coefficient|",
         yaxis={"autorange": "reversed"},
         barmode="group",
-        legend={"orientation": "h", "y": -0.2},
+        legend=_LEGEND,
+        margin=_MARGIN,
     )
     return fig
 
@@ -276,7 +296,6 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
         return _empty_fig("No runs selected")
 
     fig = go.Figure()
-    # Perfect calibration reference
     fig.add_trace(go.Scatter(
         x=[0, 1], y=[0, 1], mode="lines",
         line={"dash": "dash", "color": "lightgray", "width": 1},
@@ -291,7 +310,9 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
             model = _load_model(run_id)
             X_test, y_test, _ = _reconstruct_test_data(row)
             y_proba = model.predict_proba(X_test)[:, 1]
-            frac_pos, mean_pred = sk_calibration_curve(y_test, y_proba, n_bins=10)
+            frac_pos, mean_pred = sk_calibration_curve(
+                y_test, y_proba, n_bins=10
+            )
             fig.add_trace(go.Scatter(
                 x=mean_pred.tolist(), y=frac_pos.tolist(),
                 mode="lines+markers",
@@ -301,11 +322,12 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
             continue
 
     fig.update_layout(
-        title="Calibration Curve",
         xaxis_title="Mean predicted probability",
         yaxis_title="Fraction of positives",
-        xaxis={"range": [0, 1]}, yaxis={"range": [0, 1]},
-        legend={"orientation": "h", "y": -0.2},
+        xaxis={"range": [0, 1]},
+        yaxis={"range": [0, 1]},
+        legend=_LEGEND,
+        margin=_MARGIN,
     )
     return fig
 
@@ -316,7 +338,6 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
         return _empty_fig("No runs to display")
 
     df = pd.DataFrame(runs_data)
-    # Only test metrics — skip train_ prefixed ones for readability
     metric_cols = [
         c for c in df.columns
         if c.startswith("metric_") and "train" not in c
@@ -334,15 +355,15 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
         ))
 
     fig.update_layout(
-        title="Metric Distribution Across Runs",
         yaxis_title="Score",
         yaxis={"range": [0, 1]},
         showlegend=False,
+        margin=_MARGIN,
     )
     return fig
 
 
-# ── SHAP visualizations ──────────────────────────────────────────────────────
+# ── SHAP visualizations ───────────────────────────────────────────────────────
 # Cache: run_id → (shap_values, feat_names, X_t) — instant repeat calls.
 _shap_cache: dict[str, tuple] = {}
 
@@ -362,7 +383,7 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
     Samples at most 500 rows for performance.
 
     Returns:
-        (shap_values, feat_names, X_t) or (None, None, None) on any failure.
+        (shap_values, feat_names, X_t) or (None, None, None) on failure.
     """
     if run_id in _shap_cache:
         return _shap_cache[run_id]
@@ -373,27 +394,22 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
         clf = model.named_steps["clf"]
         preprocessor = model.named_steps["preproc"]
 
-        # Transform to model input space
         X_t = preprocessor.transform(X_test)
 
-        # Densify sparse output (e.g. OneHotEncoder)
         if hasattr(X_t, "toarray"):
             X_t = X_t.toarray()
 
-        # Subsample for speed
         if len(X_t) > 500:
             rng = np.random.RandomState(42)
             idx = rng.choice(len(X_t), 500, replace=False)
             X_t = X_t[idx]
 
-        # Readable feature names
         try:
             raw_names = preprocessor.get_feature_names_out()
             feat_names = [_clean_feat_name(n) for n in raw_names]
         except Exception:
             feat_names = [f"feat_{i}" for i in range(X_t.shape[1])]
 
-        # Choose explainer
         if hasattr(clf, "feature_importances_"):
             explainer = shap.TreeExplainer(clf)
             sv = explainer.shap_values(X_t)
@@ -403,7 +419,6 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
         else:
             return None, None, None
 
-        # Binary classification → take class-1 array
         if isinstance(sv, list) and len(sv) == 2:
             sv = sv[1]
 
@@ -418,15 +433,13 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
 
 
 def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
-    """SHAP beeswarm summary — the classic SHAP visualisation.
+    """SHAP beeswarm summary.
 
     Each dot = one test sample.
-    X axis : SHAP value (positive → pushes toward survived=1,
-                         negative → pushes toward survived=0).
+    X axis : SHAP value (positive = toward survived=1).
     Y axis : feature (top 15 by mean |SHAP|, most important at top).
-    Colour : normalised feature value — red = high value, blue = low value.
-
-    Uses only the first selected run (beeswarm is per-model).
+    Colour : normalised feature value — red = high, blue = low.
+    Uses only the first selected run.
     """
     if not _shap_available():
         return _empty_fig("SHAP não instalado. Execute: pip install shap")
@@ -445,24 +458,20 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
         if sv is None:
             return _empty_fig("SHAP não disponível para este modelo")
 
-        # Top 15 features by mean |SHAP|, sorted ascending so most
-        # important ends up at the top of the chart (y=14).
         mean_abs = np.abs(sv).mean(axis=0)
         top_n = min(15, len(mean_abs))
-        # Descending → take top_n → reverse so least important is at y=0
         top_idx = np.argsort(mean_abs)[::-1][:top_n][::-1]
 
         n_samples = sv.shape[0]
         rng = np.random.RandomState(42)
 
         fig = go.Figure()
-        show_colorbar = True  # only the first trace renders the colour scale
+        show_colorbar = True
 
         for rank, feat_i in enumerate(top_idx):
             shap_vals = sv[:, feat_i]
             feat_vals = X_t[:, feat_i]
 
-            # Normalise feature values to [0, 1] for colour mapping
             f_min, f_max = feat_vals.min(), feat_vals.max()
             feat_norm = (
                 (feat_vals - f_min) / (f_max - f_min)
@@ -470,7 +479,6 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
                 else np.full_like(feat_vals, 0.5)
             )
 
-            # Small y-jitter for beeswarm spread
             y_pos = rank + rng.uniform(-0.3, 0.3, size=n_samples)
 
             fig.add_trace(go.Scatter(
@@ -502,14 +510,13 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
                     "<extra></extra>"
                 ),
             ))
-            show_colorbar = False  # only first trace
+            show_colorbar = False
 
         feat_labels = [feat_names[i] for i in top_idx]
 
         fig.update_layout(
-            title=f"SHAP Summary (beeswarm) — {_run_label(row)}",
             xaxis={
-                "title": "SHAP Value  ← sobreviveu=0  |  sobreviveu=1 →",
+                "title": "SHAP  ← survived=0  |  survived=1 →",
                 "zeroline": True,
                 "zerolinecolor": "lightgray",
                 "zerolinewidth": 1,
@@ -521,7 +528,7 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
                 "showgrid": False,
             },
             showlegend=False,
-            margin={"l": 130, "r": 20, "t": 40, "b": 50},
+            margin={"l": 130, "r": 20, "t": 15, "b": 40},
         )
         return fig
 
@@ -558,7 +565,6 @@ def plot_shap_dependence(
         if sv is None:
             return _empty_fig("SHAP não disponível para este modelo")
 
-        # Exact match first; then prefix match for one-hot encoded features
         if feature_name in feat_names:
             feat_idx = feat_names.index(feature_name)
         else:
@@ -595,9 +601,9 @@ def plot_shap_dependence(
         ))
 
         fig.update_layout(
-            title=f"SHAP Dependence — {feature_name} ({_run_label(row)})",
             xaxis_title=f"{col_name} (valor transformado)",
             yaxis_title="SHAP Value",
+            margin=_MARGIN,
         )
         return fig
 

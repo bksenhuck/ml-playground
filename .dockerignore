@@ -1,7 +1,13 @@
 __pycache__
 *.pyc
+*.pyo
 .pytest_cache
 venv
+venv-ml-playground
+.venv
 env
+.env
 mlruns
-mlflow.db
+.git
+.gitignore
+README.md

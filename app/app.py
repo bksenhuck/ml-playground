@@ -32,7 +32,11 @@ def serve_app() -> dash.Dash:
     # prepare dataset features for the features dropdown at layout creation
     import seaborn as sns
     _df = sns.load_dataset("titanic")
-    _features = [c for c in _df.columns if c not in ("survived",)]
+    # Exclude the target and columns that directly encode or are fully derived from it
+    # (alive = "yes"/"no" for survived; class/who/adult_male/embark_town/alone are
+    # redundant with pclass/sex/age/embarked/sibsp+parch — keeping them risks data leakage)
+    _EXCLUDED = {"survived", "alive", "class", "who", "adult_male", "embark_town", "alone"}
+    _features = [c for c in _df.columns if c not in _EXCLUDED]
     _feature_opts = [{"label": f, "value": f} for f in _features]
     _feature_default = [f for f in ["age", "sex", "pclass"] if f in _features]
 
@@ -449,7 +453,7 @@ def serve_app() -> dash.Dash:
                         dbc.Col(
                             html.Div(controls, style={"height": "100%", "display": "flex", "flexDirection": "column"}),
                             width=3,
-                            style={"height": "calc(100vh - 110px)"}
+                            style={"height": "calc(100vh - 135px)"}
                         ),
                         # Right: Results area
                         dbc.Col(
@@ -497,7 +501,7 @@ def serve_app() -> dash.Dash:
                                         ),
                                         dbc.CardBody(
                                             runs_table,
-                                            style={"padding": "0", "height": "250px", "overflowY": "auto"},
+                                            style={"padding": "0", "height": "200px", "overflowY": "auto"},
                                         ),
                                     ],
                                     className="mb-3",
@@ -516,28 +520,38 @@ def serve_app() -> dash.Dash:
                                         ),
                                         dbc.CardBody(
                                             [
-                                                dcc.Dropdown(
-                                                    id="chart-select-bottom",
-                                                    options=[
-                                                        {"label": "Radar (metrics)",        "value": "radar"},
-                                                        {"label": "Bar — F1 by run",        "value": "bar_f1"},
-                                                        {"label": "ROC Curve",              "value": "roc"},
-                                                        {"label": "Precision-Recall Curve", "value": "pr_curve"},
-                                                        {"label": "Confusion Matrix",       "value": "confusion_matrix"},
-                                                        {"label": "Feature Importance",     "value": "feature_importance"},
-                                                        {"label": "Calibration Curve",      "value": "calibration"},
-                                                        {"label": "Metric Distribution",    "value": "metric_dist"},
-                                                        {"label": "SHAP Summary",           "value": "shap_summary"},
-                                                        {"label": "SHAP Dependence",        "value": "shap_dependence"},
-                                                    ],
-                                                    value="radar",
-                                                    clearable=False,
-                                                    className="mb-1",
-                                                    style={"width": "300px", "fontSize": "0.9rem"}
-                                                ),
-                                                # ── Controls row: SHAP selector + chart description ──
+                                                # ── Controls row: dropdown + inline description + SHAP selector ──
                                                 html.Div(
                                                     [
+                                                        dcc.Dropdown(
+                                                            id="chart-select-bottom",
+                                                            options=[
+                                                                {"label": "Radar (metrics)",        "value": "radar"},
+                                                                {"label": "Bar — F1 by run",        "value": "bar_f1"},
+                                                                {"label": "ROC Curve",              "value": "roc"},
+                                                                {"label": "Precision-Recall Curve", "value": "pr_curve"},
+                                                                {"label": "Confusion Matrix",       "value": "confusion_matrix"},
+                                                                {"label": "Feature Importance",     "value": "feature_importance"},
+                                                                {"label": "Calibration Curve",      "value": "calibration"},
+                                                                {"label": "Metric Distribution",    "value": "metric_dist"},
+                                                                {"label": "SHAP Summary",           "value": "shap_summary"},
+                                                                {"label": "SHAP Dependence",        "value": "shap_dependence"},
+                                                            ],
+                                                            value="radar",
+                                                            clearable=False,
+                                                            style={"width": "220px", "fontSize": "0.9rem", "flexShrink": "0"},
+                                                        ),
+                                                        html.Div(
+                                                            id="chart-info-text",
+                                                            style={
+                                                                "fontSize": "0.85rem",
+                                                                "color": "#6c757d",
+                                                                "fontStyle": "italic",
+                                                                "paddingLeft": "12px",
+                                                                "flex": "1",
+                                                                "minWidth": "0",
+                                                            },
+                                                        ),
                                                         dcc.Dropdown(
                                                             id="shap-feature-select",
                                                             placeholder="Feature para SHAP...",
@@ -546,29 +560,16 @@ def serve_app() -> dash.Dash:
                                                                 "width": "190px",
                                                                 "fontSize": "0.82rem",
                                                                 "display": "none",
+                                                                "flexShrink": "0",
                                                             },
                                                         ),
                                                     ],
-                                                    className="d-flex align-items-center gap-3 mb-1",
-                                                ),
-                                                html.Div(
-                                                    id="chart-info-text",
-                                                    style={
-                                                        "textAlign": "center",
-                                                        "fontSize": "0.78rem",
-                                                        "color": "#495057",
-                                                        "fontStyle": "italic",
-                                                        "backgroundColor": "#f8f9fa",
-                                                        "border": "1px solid #dee2e6",
-                                                        "borderRadius": "4px",
-                                                        "padding": "5px 12px",
-                                                        "marginBottom": "6px",
-                                                    },
+                                                    className="d-flex align-items-center mb-2",
                                                 ),
                                                 dcc.Loading(
                                                     dcc.Graph(
                                                         id="bottom-chart",
-                                                        style={"height": "calc(100vh - 580px)"},
+                                                        style={"height": "calc(100vh - 537px)"},
                                                         config={"displayModeBar": False}
                                                     ),
                                                     type="circle",
@@ -582,7 +583,7 @@ def serve_app() -> dash.Dash:
                                 ),
                             ],
                             width=7,
-                            style={"height": "calc(100vh - 110px)", "display": "flex", "flexDirection": "column"}
+                            style={"height": "calc(100vh - 135px)", "display": "flex", "flexDirection": "column"}
                         ),
                         # Far Right: AI Assistant Placeholder
                         dbc.Col(
@@ -642,14 +643,14 @@ def serve_app() -> dash.Dash:
                                 style={"height": "100%", "display": "flex", "flexDirection": "column"}
                             ),
                             width=2,
-                            style={"height": "calc(100vh - 110px)"}
+                            style={"height": "calc(100vh - 135px)"}
                         ),
                     ],
                     className="g-4"
                 )
             ],
             fluid=True,
-            style={"paddingTop": "20px", "height": "calc(100vh - 95px)", "overflow": "hidden"}
+            style={"paddingTop": "20px", "paddingBottom": "20px", "height": "calc(100vh - 95px)", "overflow": "hidden"}
         )
 
     def datasets_layout():
@@ -1494,7 +1495,13 @@ def serve_app() -> dash.Dash:
             return _empty_fig(
                 "Selecione ao menos um experimento na tabela para ver o gráfico"
             )
-        sel = df.iloc[selected_rows]
+        # Guard against stale indices when store is refreshed or tabs switch
+        valid_rows = [i for i in selected_rows if i < len(df)]
+        if not valid_rows:
+            return _empty_fig(
+                "Selecione ao menos um experimento na tabela para ver o gráfico"
+            )
+        sel = df.iloc[valid_rows]
 
         # ── Bar F1 (respects metric-mode) ─────────────────────────────────────
         if chart_type == "bar_f1":
@@ -1511,7 +1518,10 @@ def serve_app() -> dash.Dash:
                 x="run_name" if "run_name" in sel.columns else sel.index,
                 y=y_col,
                 color="model" if "model" in sel.columns else None,
-                title=f"{label} by run",
+            )
+            fig.update_layout(
+                legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+                margin={"t": 15, "b": 40, "l": 50, "r": 150},
             )
             return fig
 
@@ -1575,7 +1585,8 @@ def serve_app() -> dash.Dash:
         fig.update_layout(
             polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
             showlegend=True,
-            title=f"Model Comparison (Radar){suffix}",
+            legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+            margin={"t": 15, "b": 20, "l": 20, "r": 150},
         )
         return fig
 

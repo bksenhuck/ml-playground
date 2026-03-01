@@ -1,0 +1,95 @@
+"""Build the Docker image, push to GCR and deploy to Cloud Run.
+
+The mlflow.db is copied into the image at build time, so experiment
+history is always included in the deployed version.
+
+Usage:
+    python -m deploy.build_and_deploy
+    python -m deploy.build_and_deploy --deploy-only   # skip build+push
+
+Requirements:
+    - Docker running locally
+    - gcloud CLI authenticated and project set
+    - .env with GCP_PROJECT_ID (and optionally GCR_IMAGE, CLOUDRUN_SERVICE, GCP_REGION)
+"""
+import sys
+import argparse
+import logging
+import subprocess
+
+from deploy.config import settings
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s  %(levelname)-8s  %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+
+
+def _run(cmd: list[str], description: str) -> bool:
+    logger.info("[%s] %s", description, " ".join(cmd))
+    result = subprocess.run(cmd, shell=True)
+    if result.returncode != 0:
+        logger.error("[%s] failed (exit %d)", description, result.returncode)
+        return False
+    logger.info("[%s] done", description)
+    return True
+
+
+def build(image: str) -> bool:
+    return _run(
+        ["docker", "build", "-t", image, "."],
+        "BUILD",
+    )
+
+
+def push(image: str) -> bool:
+    return _run(["docker", "push", image], "PUSH")
+
+
+def deploy(image: str) -> bool:
+    return _run(
+        [
+            "gcloud", "run", "deploy", settings.CLOUDRUN_SERVICE,
+            "--image", image,
+            "--region", settings.GCP_REGION,
+            "--platform", "managed",
+            "--allow-unauthenticated",
+        ],
+        "DEPLOY",
+    )
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Build, push and deploy ML Playground to Cloud Run"
+    )
+    parser.add_argument(
+        "--deploy-only",
+        action="store_true",
+        help="Skip build and push — redeploy using the existing image",
+    )
+    args = parser.parse_args()
+
+    settings.validate()
+    image = settings.get_docker_image()
+
+    logger.info("=== ML PLAYGROUND DEPLOY ===")
+    logger.info("Image : %s", image)
+    logger.info("Service: %s  |  Region: %s", settings.CLOUDRUN_SERVICE, settings.GCP_REGION)
+
+    if not args.deploy_only:
+        if not build(image):
+            sys.exit(1)
+        if not push(image):
+            sys.exit(1)
+
+    if not deploy(image):
+        sys.exit(1)
+
+    logger.info("=== DEPLOY COMPLETE ===")
+
+
+if __name__ == "__main__":
+    main()
