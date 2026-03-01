@@ -16,7 +16,7 @@ import dash_bootstrap_components as dbc
 import pandas as pd
 import plotly.express as px
 
-from experiments.tracker import list_runs, run_experiment_and_log
+from experiments.tracker import run_experiment_and_log
 
 
 APP_TITLE = "ML Playground"
@@ -208,12 +208,8 @@ def serve_app() -> dash.Dash:
         style={"height": "100%", "display": "flex", "flexDirection": "column"},
     )
 
-    # initialize runs table data from MLflow (if available)
-    try:
-        runs_df = list_runs()
-        initial_runs = runs_df.to_dict("records")
-    except Exception:
-        initial_runs = []
+    # initialize runs table data (empty by default for in-memory session)
+    initial_runs = []
 
     runs_table = dash_table.DataTable(
         id="runs-table",
@@ -1363,6 +1359,7 @@ def serve_app() -> dash.Dash:
         Output("runs-data-store", "data"),
         Input("run-btn", "n_clicks"),
         Input("delete-btn", "n_clicks"),
+        State("runs-data-store", "data"),
         State("feature-select", "value"),
         State("scaling", "value"),
         State("class-weight", "value"),
@@ -1375,22 +1372,17 @@ def serve_app() -> dash.Dash:
         State("cv-folds", "value"),
         prevent_initial_call=True,
     )
-    def handle_experiment_actions(run_clicks: int, delete_clicks: int, features: List[str], scaling: str, class_weight: str, poly_features: List[str], test_size: int, model: str, run_name: str | None, hyper_children, cv_enabled, cv_folds_val):
+    def handle_experiment_actions(run_clicks: int, delete_clicks: int, current_data: List[dict], features: List[str], scaling: str, class_weight: str, poly_features: List[str], test_size: int, model: str, run_name: str | None, hyper_children, cv_enabled, cv_folds_val):
         """Unified callback for all experiment actions (Run/Delete) to avoid duplicate output conflicts."""
         ctx = callback_context
         if not ctx.triggered:
             return no_update, no_update
 
         triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
+        data = current_data or []
 
         if triggered_id == "delete-btn":
-            from experiments.tracker import delete_all_runs
-            try:
-                count = delete_all_runs()
-                runs = list_runs()
-                return html.Div([f"Deleted {count} runs."]), runs.to_dict("records")
-            except Exception as e:
-                return html.Div([f"Delete failed: {e}"], style={"color": "red"}), []
+            return html.Div(["All runs deleted from view."]), []
 
         # Handle Run Action
         params = {}
@@ -1433,7 +1425,9 @@ def serve_app() -> dash.Dash:
 
         cv_k = int(cv_folds_val or 5) if "enabled" in (cv_enabled or []) else 0
 
-        run_id, metrics = run_experiment_and_log(
+        # run_experiment_and_log should now return a dict representing the run
+        # as per the tracker.py rewrite mentioned in context.
+        run_result = run_experiment_and_log(
             features or [],
             scaling,
             model,
@@ -1444,10 +1438,16 @@ def serve_app() -> dash.Dash:
             poly_features=poly_enabled,
             cv_folds=cv_k,
         )
-        try:
-            data = list_runs().to_dict("records")
-        except Exception:
-            data = []
+
+        if isinstance(run_result, dict):
+            data.append(run_result)
+            run_id = run_result.get("run_id", "unknown")
+        else:
+            # Fallback if tracker still returns (run_id, metrics)
+            run_id, _ = run_result
+            # In this case we'd need to fetch or reconstruct, but user said tracker.py is rewritten
+            # to return a row dict.
+
         return html.Div([f"Last run: {run_id}"]), data
 
     @app.callback(

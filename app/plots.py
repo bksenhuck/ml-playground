@@ -1,16 +1,16 @@
 """Reusable Plotly figures for the visualization dropdown.
 
 Each public function accepts either a list of run-row dicts (multi-run)
-or a single dict, and returns a go.Figure.  Model-heavy plots load the
-saved sklearn pipeline from MLflow artifacts and reconstruct the exact
-same train/test split that was used during training (random_state=42).
+or a single dict, and returns a go.Figure.
+
+Models are loaded from ``_model_cache`` (populated when the user clicks
+"Run Experiment").  If a run_id is not in the cache (e.g. after a server
+restart) the pipeline is rebuilt and refitted from the stored params.
 """
 from __future__ import annotations
 
-from pathlib import Path
-from typing import List
+from typing import Any, Dict, List, Optional
 
-import mlflow.sklearn
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
@@ -23,27 +23,69 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 
-# ── MLflow setup ──────────────────────────────────────────────────────────────
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_TRACKING_URI = (
-    "sqlite:///" + (_PROJECT_ROOT / "mlflow.db").as_posix()
-)
+# ── In-memory model cache ─────────────────────────────────────────────────────
+# Populated by experiments/tracker.py immediately after each training run.
+# Keyed by run_id (UUID string).  Cleared on process restart (acceptable for
+# Cloud Run — store data in the browser is also lost on refresh).
+_model_cache: Dict[str, Any] = {}
 
 
-def _setup_mlflow() -> None:
-    mlflow.set_tracking_uri(_TRACKING_URI)
+def _get_model(run_row: dict):
+    """Return the fitted pipeline for a run, rebuilding from params if needed."""
+    run_id = run_row.get("run_id", "")
+    if run_id and run_id in _model_cache:
+        return _model_cache[run_id]
+
+    # Fallback: rebuild from stored params (covers server-restart edge case)
+    from ml.pipeline import build_pipeline  # noqa: PLC0415
+
+    features_str = str(run_row.get("features", "") or "")
+    features = [f.strip() for f in features_str.split(",") if f.strip()]
+    if not features:
+        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+
+    test_size = float(run_row.get("test_size", 0.2) or 0.2)
+    model_name = str(run_row.get("model", "logreg"))
+    scaling = str(run_row.get("scaling", "standard"))
+    class_weight = str(run_row.get("class_weight", "none"))
+    poly_features = bool(run_row.get("poly_features", False))
+
+    params: dict = {}
+    c = run_row.get("C")
+    if c is not None:
+        params["C"] = float(c)
+    n = run_row.get("n_estimators")
+    if n is not None:
+        params["n_estimators"] = int(n)
+    d = run_row.get("max_depth")
+    if d is not None:
+        params["max_depth"] = int(d)
+    lr = run_row.get("learning_rate")
+    if lr is not None:
+        params["learning_rate"] = float(lr)
+
+    df = sns.load_dataset("titanic").dropna(subset=["survived"])
+    X = df[features].copy()
+    y = df["survived"].astype(int)
+    X_train, _, y_train, _ = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
+    )
+
+    pipeline = build_pipeline(
+        features, scaling, model_name, params,
+        class_weight=class_weight, poly_features=poly_features,
+    )
+    pipeline.fit(X_train, y_train)
+
+    if run_id:
+        _model_cache[run_id] = pipeline
+    return pipeline
 
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _load_model(run_id: str):
-    """Load a fitted sklearn Pipeline from MLflow artifacts."""
-    _setup_mlflow()
-    return mlflow.sklearn.load_model(f"runs:/{run_id}/model")
-
-
 def _reconstruct_test_data(run_row: dict):
-    """Recreate (X_test, y_test, feature_list) from params in MLflow.
+    """Recreate (X_test, y_test, feature_list) from params stored in the run row.
 
     Must mirror train.py::run_training exactly:
     - same random_state=42, same stratify=y
@@ -124,11 +166,10 @@ def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
     ))
 
     for row in runs_data:
-        run_id = row.get("run_id", "")
-        if not run_id:
+        if not row.get("run_id"):
             continue
         try:
-            model = _load_model(run_id)
+            model = _get_model(row)
             X_test, y_test, _ = _reconstruct_test_data(row)
             y_proba = model.predict_proba(X_test)[:, 1]
             fpr, tpr, _ = roc_curve(y_test, y_proba)
@@ -158,11 +199,10 @@ def plot_pr_curve(runs_data: List[dict]) -> go.Figure:
 
     fig = go.Figure()
     for row in runs_data:
-        run_id = row.get("run_id", "")
-        if not run_id:
+        if not row.get("run_id"):
             continue
         try:
-            model = _load_model(run_id)
+            model = _get_model(row)
             X_test, y_test, _ = _reconstruct_test_data(row)
             y_proba = model.predict_proba(X_test)[:, 1]
             precision, recall, _ = precision_recall_curve(y_test, y_proba)
@@ -192,9 +232,8 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
         return _empty_fig("No runs selected")
 
     row = valid[0]
-    run_id = row["run_id"]
     try:
-        model = _load_model(run_id)
+        model = _get_model(row)
         X_test, y_test, _ = _reconstruct_test_data(row)
         y_pred = model.predict(X_test)
         cm = confusion_matrix(y_test, y_pred)
@@ -232,11 +271,8 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
     any_plotted = False
 
     for row in valid:
-        run_id = row["run_id"]
         try:
-            model = _load_model(run_id)
-            _reconstruct_test_data(row)
-
+            model = _get_model(row)
             clf = model.named_steps["clf"]
             preprocessor = model.named_steps["preproc"]
 
@@ -251,9 +287,7 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
                     if hasattr(clf, "feature_importances_")
                     else len(clf.coef_[0])
                 )
-                feat_names = np.array(
-                    [f"feat_{i}" for i in range(n_feats)]
-                )
+                feat_names = np.array([f"feat_{i}" for i in range(n_feats)])
 
             if hasattr(clf, "feature_importances_"):
                 importances = clf.feature_importances_
@@ -303,11 +337,10 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
     ))
 
     for row in runs_data:
-        run_id = row.get("run_id", "")
-        if not run_id:
+        if not row.get("run_id"):
             continue
         try:
-            model = _load_model(run_id)
+            model = _get_model(row)
             X_test, y_test, _ = _reconstruct_test_data(row)
             y_proba = model.predict_proba(X_test)[:, 1]
             frac_pos, mean_pred = sk_calibration_curve(
@@ -378,12 +411,9 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
     """Compute and cache SHAP values for a single run.
 
     Selects the explainer automatically:
-      - TreeExplainer  for tree-based models (Random Forest)
+      - TreeExplainer  for tree-based models (Random Forest, XGBoost)
       - LinearExplainer for linear models (Logistic Regression)
     Samples at most 500 rows for performance.
-
-    Returns:
-        (shap_values, feat_names, X_t) or (None, None, None) on failure.
     """
     if run_id in _shap_cache:
         return _shap_cache[run_id]
@@ -433,14 +463,7 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
 
 
 def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
-    """SHAP beeswarm summary.
-
-    Each dot = one test sample.
-    X axis : SHAP value (positive = toward survived=1).
-    Y axis : feature (top 15 by mean |SHAP|, most important at top).
-    Colour : normalised feature value — red = high, blue = low.
-    Uses only the first selected run.
-    """
+    """SHAP beeswarm summary (first selected run only)."""
     if not _shap_available():
         return _empty_fig("SHAP não instalado. Execute: pip install shap")
 
@@ -451,7 +474,7 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
     row = valid[0]
     run_id = row["run_id"]
     try:
-        model = _load_model(run_id)
+        model = _get_model(row)
         X_test, _, _ = _reconstruct_test_data(row)
         sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
 
@@ -538,13 +561,9 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
 
 def plot_shap_dependence(
     runs_data: List[dict],
-    feature_name: str | None,
+    feature_name: Optional[str],
 ) -> go.Figure:
-    """SHAP dependence plot for one feature on the first selected run.
-
-    X axis: transformed feature value.
-    Y axis: SHAP contribution (positive = towards class 1 / survived).
-    """
+    """SHAP dependence plot for one feature on the first selected run."""
     if not _shap_available():
         return _empty_fig("SHAP não instalado. Execute: pip install shap")
 
@@ -558,7 +577,7 @@ def plot_shap_dependence(
     row = valid[0]
     run_id = row["run_id"]
     try:
-        model = _load_model(run_id)
+        model = _get_model(row)
         X_test, _, _ = _reconstruct_test_data(row)
         sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
 
