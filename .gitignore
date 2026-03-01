@@ -1,0 +1,13 @@
+mlflow.db
+mlruns/
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+venv-ml-playground/
+.DS_Store
