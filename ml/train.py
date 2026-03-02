@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import uuid
 import warnings
-import logging
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -21,7 +20,6 @@ from sklearn.metrics import (
 
 from ml.pipeline import build_pipeline
 
-logging.getLogger("mlflow").setLevel(logging.ERROR)
 warnings.filterwarnings("ignore", category=UserWarning)
 
 

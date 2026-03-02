@@ -1,4 +1,4 @@
-"""Deploy configuration — reads GCS and Cloud Run settings from environment.
+"""Deploy configuration — reads Cloud Run settings from environment.
 
 All values come from environment variables (or a .env file loaded by
 python-dotenv before this module is imported).
@@ -15,8 +15,6 @@ try:
 except ImportError:
     pass
 
-ROOT = Path(__file__).resolve().parents[1]
-
 
 class DeploySettings:
     # ── GCP ──────────────────────────────────────────────────────────────────
@@ -28,15 +26,6 @@ class DeploySettings:
     # Full image URI, e.g. gcr.io/my-project/ml-playground:latest
     # Falls back to gcr.io/{GCP_PROJECT_ID}/ml-playground if not set.
     GCR_IMAGE: str = os.environ.get("GCR_IMAGE", "")
-
-    # ── GCS artifacts ─────────────────────────────────────────────────────────
-    # gs://your-bucket/mlflow.db
-    GCS_MLFLOW_URI: str = os.environ.get("GCS_MLFLOW_URI", "")
-
-    # ── Local paths ───────────────────────────────────────────────────────────
-    @classmethod
-    def get_mlflow_db_path(cls) -> Path:
-        return ROOT / "mlflow.db"
 
     @classmethod
     def get_docker_image(cls) -> str:
@@ -51,15 +40,10 @@ class DeploySettings:
     @classmethod
     def validate(cls) -> None:
         """Raise if required deploy vars are missing."""
-        missing = []
         if not cls.GCP_PROJECT_ID:
-            missing.append("GCP_PROJECT_ID")
-        if not cls.GCS_MLFLOW_URI:
-            missing.append("GCS_MLFLOW_URI")
-        if missing:
             raise EnvironmentError(
-                f"Missing required env vars: {', '.join(missing)}\n"
-                "Copy .env.example to .env and fill in the values."
+                "Missing required env var: GCP_PROJECT_ID\n"
+                "Add it to your .env file or export it before running."
             )
 
 

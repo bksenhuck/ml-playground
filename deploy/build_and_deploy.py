@@ -1,15 +1,14 @@
-"""Build the Docker image, push to GCR and deploy to Cloud Run.
+"""Build the Docker image via Cloud Build, push to GCR and deploy to Cloud Run.
 
-The mlflow.db is copied into the image at build time, so experiment
-history is always included in the deployed version.
+Experiment runs are stored per-session in the browser (dcc.Store) — no DB
+artifact is included in the image.
 
 Usage:
     python -m deploy.build_and_deploy
     python -m deploy.build_and_deploy --deploy-only   # skip build+push
 
 Requirements:
-    - Docker running locally
-    - gcloud CLI authenticated and project set
+    - gcloud CLI authenticated and project set (no local Docker needed)
     - .env with GCP_PROJECT_ID (and optionally GCR_IMAGE, CLOUDRUN_SERVICE, GCP_REGION)
 """
 import sys
