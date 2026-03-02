@@ -881,10 +881,11 @@ def serve_app() -> dash.Dash:
             return dbc.Table(
                 [
                     html.Thead(html.Tr([
-                        html.Th("Parâmetro", style={"width": "18%"}),
-                        html.Th("Padrão", style={"width": "12%"}),
-                        html.Th("Range / Valores"),
-                        html.Th("O que faz"),
+                        html.Th("Parâmetro",           style={"width": "14%"}),
+                        html.Th("Padrão",              style={"width": "9%"}),
+                        html.Th("Range / Valores",     style={"width": "14%"}),
+                        html.Th("O que faz",           style={"width": "30%"}),
+                        html.Th("Expectativa ao mudar o valor", style={"width": "33%"}),
                     ])),
                     html.Tbody([
                         html.Tr([
@@ -892,6 +893,7 @@ def serve_app() -> dash.Dash:
                             html.Td(html.Code(str(r[1]))),
                             html.Td(r[2]),
                             html.Td(r[3]),
+                            html.Td(r[4], style={"color": "#5a6474", "fontStyle": "italic"}),
                         ])
                         for r in rows
                     ]),
@@ -907,13 +909,17 @@ def serve_app() -> dash.Dash:
                 "0.01 – 10.0",
                 "Inverso da força de regularização. C alto = menos regularização. "
                 "C baixo = mais regularização (modelo mais simples).",
+                "Valores altos reduzem a penalização e aumentam o risco de overfitting. "
+                "Valores baixos simplificam o modelo e podem causar underfitting.",
             ),
             (
                 "penalty",
                 "l2",
-                "l1 (Lasso) ou l2 (Ridge)",
-                "Tipo de penalização aplicada. L1 pode zerar coeficientes (seleção de features), "
-                "enquanto L2 apenas os diminui.",
+                "l1 · l2",
+                "Tipo de penalização. L1 pode zerar coeficientes (seleção de features), "
+                "L2 apenas os diminui.",
+                "L1 gera esparsidade: alguns coeficientes vão a zero, selecionando features automaticamente. "
+                "L2 mantém todos os coeficientes ativos, mas os reduz proporcionalmente.",
             ),
         ]
         rf_params = [
@@ -923,6 +929,8 @@ def serve_app() -> dash.Dash:
                 "10 – 500",
                 "Número de árvores na floresta. Mais árvores costumam melhorar o modelo, "
                 "mas aumentam o tempo de treino.",
+                "Valores maiores melhoram a generalização e estabilidade das predições. "
+                "Dificilmente causa overfitting, mas o treino fica mais lento.",
             ),
             (
                 "max_depth",
@@ -930,12 +938,16 @@ def serve_app() -> dash.Dash:
                 "1 – 30",
                 "Profundidade máxima de cada árvore. Árvores muito profundas "
                 "podem causar overfitting.",
+                "Valores altos deixam as árvores mais complexas e aumentam o risco de overfitting. "
+                "Valores baixos simplificam demais e podem causar underfitting.",
             ),
             (
                 "min_samples_split",
                 2,
                 "2 – 20",
-                "Número mínimo de amostras necessárias para dividir um nó interno.",
+                "Mínimo de amostras para dividir um nó interno.",
+                "Valores maiores tornam os nós mais conservadores, resultando em árvores mais rasas "
+                "e menos propensas a overfitting.",
             ),
         ]
         xgb_params = [
@@ -943,26 +955,35 @@ def serve_app() -> dash.Dash:
                 "n_estimators",
                 100,
                 "10 – 500",
-                "Número de rounds de boosting (árvores). Mais rounds aumentam a complexidade.",
+                "Número de rounds de boosting. Cada round adiciona uma árvore para corrigir erros.",
+                "Valores maiores aumentam a capacidade do modelo. Sem early stopping, "
+                "valores muito altos podem causar overfitting.",
             ),
             (
                 "max_depth",
                 6,
                 "1 – 12",
-                "Profundidade máxima das árvores. No boosting, profundidades menores (3-6) "
-                "são comuns.",
+                "Profundidade máxima das árvores. No boosting, valores menores (3–6) "
+                "são recomendados.",
+                "Valores altos tornam as árvores mais expressivas e aumentam o risco de overfitting. "
+                "Valores entre 3 e 5 costumam ser o ponto ideal.",
             ),
             (
                 "learning_rate",
                 0.1,
                 "0.01 – 0.5",
-                "Passo de aprendizado. Valores baixos exigem mais n_estimators.",
+                "Passo de aprendizado (shrinkage). Escala a contribuição de cada árvore.",
+                "Valores baixos tornam o aprendizado mais cauteloso e estável, "
+                "mas exigem mais n_estimators para compensar. "
+                "Valores altos aprendem mais rápido, mas com maior risco de instabilidade.",
             ),
             (
                 "subsample",
                 1.0,
                 "0.5 – 1.0",
-                "Fração de amostras usadas para treinar cada árvore. Ajuda a evitar overfitting.",
+                "Fração de amostras usadas por árvore (sem reposição).",
+                "Valores menores introduzem aleatoriedade e funcionam como regularização, "
+                "reduzindo overfitting. Valores muito baixos aumentam a variância das predições.",
             ),
         ]
 
@@ -1203,21 +1224,31 @@ def serve_app() -> dash.Dash:
                                 dbc.CardBody(
                                     dbc.Row([
                                         dbc.Col([
-                                            html.H6("Em desenvolvimento", className="text-muted fw-bold"),
+                                            html.H6("Concluído", className="fw-bold", style={"color": "#27ae60"}),
+                                            dbc.ListGroup([
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "Classificação — Titanic"]),
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "Logistic Regression, Random Forest, XGBoost"]),
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "SHAP Explainability (summary + dependence)"]),
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "AI Insights Assistant (Gemini + fallback)"]),
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "Cross-validation e métricas de treino"]),
+                                                dbc.ListGroupItem([dbc.Badge("✓", color="success", className="me-2"), "Deploy no Google Cloud Run"]),
+                                            ], flush=True),
+                                        ], md=4),
+                                        dbc.Col([
+                                            html.H6("Em desenvolvimento", className="fw-bold", style={"color": "#e67e22"}),
                                             dbc.ListGroup([
                                                 dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "Dataset de Regressão"]),
-                                                dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "AI Insights Assistant"]),
                                                 dbc.ListGroupItem([dbc.Badge("soon", color="warning", className="me-2"), "Upload de CSV customizado"]),
                                             ], flush=True),
-                                        ], md=6),
+                                        ], md=4),
                                         dbc.Col([
                                             html.H6("Planejado", className="text-muted fw-bold"),
                                             dbc.ListGroup([
-                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "Mais modelos (XGBoost, SVM)"]),
-                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "Exportação de relatórios"]),
+                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "SVM e KNN"]),
+                                                dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "Exportação de relatórios (PDF)"]),
                                                 dbc.ListGroupItem([dbc.Badge("v2", color="secondary", className="me-2"), "AutoML básico"]),
                                             ], flush=True),
-                                        ], md=6),
+                                        ], md=4),
                                     ])
                                 ),
                             ],
@@ -1608,6 +1639,10 @@ def serve_app() -> dash.Dash:
             fig.update_layout(
                 legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
                 margin={"t": 15, "b": 40, "l": 50, "r": 150},
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                xaxis={"showgrid": False, "zeroline": False},
+                yaxis={"showgrid": False, "zeroline": False},
             )
             return fig
 
@@ -1669,10 +1704,15 @@ def serve_app() -> dash.Dash:
 
         suffix = " (Train)" if mode == "train" else ""
         fig.update_layout(
-            polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+            polar=dict(
+                bgcolor="white",
+                radialaxis=dict(visible=True, range=[0, 1], showgrid=False),
+                angularaxis=dict(showgrid=False),
+            ),
             showlegend=True,
             legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
             margin={"t": 15, "b": 20, "l": 20, "r": 150},
+            paper_bgcolor="white",
         )
         return fig
 

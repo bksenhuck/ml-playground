@@ -129,6 +129,7 @@ def _empty_fig(message: str = "No data") -> go.Figure:
         xaxis={"visible": False},
         yaxis={"visible": False},
         margin={"t": 30},
+        **_CLEAN,
     )
     return fig
 
@@ -149,6 +150,8 @@ _LEGEND = {
     "y": 1,    "yanchor": "top",
 }
 _MARGIN = {"t": 15, "b": 40, "l": 50, "r": 150}
+_CLEAN = {"paper_bgcolor": "white", "plot_bgcolor": "white"}
+_NO_GRID = {"showgrid": False, "zeroline": False}
 
 
 # ── Plot functions ────────────────────────────────────────────────────────────
@@ -184,10 +187,11 @@ def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
     fig.update_layout(
         xaxis_title="False Positive Rate",
         yaxis_title="True Positive Rate",
-        xaxis={"range": [0, 1]},
-        yaxis={"range": [0, 1]},
+        xaxis={"range": [0, 1], **_NO_GRID},
+        yaxis={"range": [0, 1], **_NO_GRID},
         legend=_LEGEND,
         margin=_MARGIN,
+        **_CLEAN,
     )
     return fig
 
@@ -217,10 +221,11 @@ def plot_pr_curve(runs_data: List[dict]) -> go.Figure:
     fig.update_layout(
         xaxis_title="Recall",
         yaxis_title="Precision",
-        xaxis={"range": [0, 1]},
-        yaxis={"range": [0, 1]},
+        xaxis={"range": [0, 1], **_NO_GRID},
+        yaxis={"range": [0, 1], **_NO_GRID},
         legend=_LEGEND,
         margin=_MARGIN,
+        **_CLEAN,
     )
     return fig
 
@@ -255,6 +260,7 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
             xaxis_title="Predicted",
             yaxis_title="Actual",
             margin=_MARGIN,
+            **_CLEAN,
         )
         return fig
     except Exception as e:
@@ -316,10 +322,12 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
 
     fig.update_layout(
         xaxis_title="Importance / |Coefficient|",
-        yaxis={"autorange": "reversed"},
+        xaxis=_NO_GRID,
+        yaxis={"autorange": "reversed", **_NO_GRID},
         barmode="group",
         legend=_LEGEND,
         margin=_MARGIN,
+        **_CLEAN,
     )
     return fig
 
@@ -357,10 +365,11 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
     fig.update_layout(
         xaxis_title="Mean predicted probability",
         yaxis_title="Fraction of positives",
-        xaxis={"range": [0, 1]},
-        yaxis={"range": [0, 1]},
+        xaxis={"range": [0, 1], **_NO_GRID},
+        yaxis={"range": [0, 1], **_NO_GRID},
         legend=_LEGEND,
         margin=_MARGIN,
+        **_CLEAN,
     )
     return fig
 
@@ -389,9 +398,11 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
 
     fig.update_layout(
         yaxis_title="Score",
-        yaxis={"range": [0, 1]},
+        xaxis=_NO_GRID,
+        yaxis={"range": [0, 1], **_NO_GRID},
         showlegend=False,
         margin=_MARGIN,
+        **_CLEAN,
     )
     return fig
 
@@ -465,7 +476,7 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
 def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
     """SHAP beeswarm summary (first selected run only)."""
     if not _shap_available():
-        return _empty_fig("SHAP não instalado. Execute: pip install shap")
+        return _empty_fig("SHAP não disponível")
 
     valid = [r for r in runs_data if r.get("run_id")]
     if not valid:
@@ -540,8 +551,9 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
         fig.update_layout(
             xaxis={
                 "title": "SHAP  ← survived=0  |  survived=1 →",
+                "showgrid": False,
                 "zeroline": True,
-                "zerolinecolor": "lightgray",
+                "zerolinecolor": "#cccccc",
                 "zerolinewidth": 1,
             },
             yaxis={
@@ -549,9 +561,11 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
                 "tickvals": list(range(len(top_idx))),
                 "ticktext": feat_labels,
                 "showgrid": False,
+                "zeroline": False,
             },
             showlegend=False,
             margin={"l": 130, "r": 20, "t": 15, "b": 40},
+            **_CLEAN,
         )
         return fig
 
@@ -565,7 +579,7 @@ def plot_shap_dependence(
 ) -> go.Figure:
     """SHAP dependence plot for one feature on the first selected run."""
     if not _shap_available():
-        return _empty_fig("SHAP não instalado. Execute: pip install shap")
+        return _empty_fig("SHAP não disponível")
 
     if not feature_name:
         return _empty_fig("Selecione uma feature no seletor acima")
@@ -622,7 +636,10 @@ def plot_shap_dependence(
         fig.update_layout(
             xaxis_title=f"{col_name} (valor transformado)",
             yaxis_title="SHAP Value",
+            xaxis=_NO_GRID,
+            yaxis=_NO_GRID,
             margin=_MARGIN,
+            **_CLEAN,
         )
         return fig
 

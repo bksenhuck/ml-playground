@@ -62,8 +62,7 @@ PLOT_DESCRIPTIONS: dict[str, str] = {
     "shap_summary": (
         "SHAP summary: mean absolute SHAP value per feature across test samples. "
         "Higher bar = feature contributes more to predictions on average. "
-        "Based on Shapley values — model-agnostic and theoretically sound. "
-        "Requires the SHAP library (pip install shap)."
+        "Based on Shapley values — model-agnostic and theoretically sound."
     ),
     "shap_dependence": (
         "SHAP dependence plot: how a single feature's SHAP contribution changes "
