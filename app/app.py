@@ -1758,6 +1758,9 @@ def serve_app() -> dash.Dash:
     return app
 
 
+# Module-level initialisation — required for gunicorn entry point (app.app:server)
+_dash_app = serve_app()
+server = _dash_app.server  # gunicorn target
+
 if __name__ == "__main__":
-    dash_app = serve_app()
-    dash_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8050)), debug=True)
+    _dash_app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 8050)), debug=False)
