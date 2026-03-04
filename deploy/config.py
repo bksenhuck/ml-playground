@@ -32,7 +32,7 @@ class DeploySettings:
         if cls.GCR_IMAGE:
             return cls.GCR_IMAGE
         if cls.GCP_PROJECT_ID:
-            return f"gcr.io/{cls.GCP_PROJECT_ID}/ml-playground"
+            return f"{cls.GCP_REGION}-docker.pkg.dev/{cls.GCP_PROJECT_ID}/ml-playground/ml-playground"
         raise ValueError(
             "Set GCR_IMAGE or GCP_PROJECT_ID in your .env"
         )

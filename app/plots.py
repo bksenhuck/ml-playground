@@ -109,6 +109,29 @@ def _reconstruct_test_data(run_row: dict):
     return X_test, y_test, features
 
 
+def _reconstruct_train_data(run_row: dict):
+    """Mirror of _reconstruct_test_data — returns the train fold.
+
+    Uses identical random_state=42, stratify=y so the split is deterministic.
+    """
+    features_str = str(run_row.get("features", "") or "")
+    features = [f.strip() for f in features_str.split(",") if f.strip()]
+    if not features:
+        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+
+    test_size = float(run_row.get("test_size", 0.2) or 0.2)
+
+    df = sns.load_dataset("titanic")
+    df = df.dropna(subset=["survived"])
+
+    X = df[features].copy()
+    y = df["survived"].astype(int)
+    X_train, _, y_train, _ = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
+    )
+    return X_train, y_train, features
+
+
 def _run_label(row: dict) -> str:
     return str(
         row.get("run_name")
@@ -156,31 +179,50 @@ _NO_GRID = {"showgrid": False, "zeroline": False}
 
 # ── Plot functions ────────────────────────────────────────────────────────────
 
-def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
-    """Multi-run ROC curve overlay."""
+def plot_roc_curve(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """Multi-run ROC curve overlay. data_split: 'test' | 'train' | 'both'."""
     if not runs_data:
         return _empty_fig("No runs selected")
 
+    from app.plot_config import COLOR_REF, PALETTE  # noqa: PLC0415
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=[0, 1], y=[0, 1], mode="lines",
-        line={"dash": "dash", "color": "lightgray", "width": 1},
+        line={"dash": "dash", "color": COLOR_REF, "width": 1},
         name="Random", showlegend=False,
     ))
 
-    for row in runs_data:
+    for i, row in enumerate(runs_data):
         if not row.get("run_id"):
             continue
         try:
             model = _get_model(row)
-            X_test, y_test, _ = _reconstruct_test_data(row)
-            y_proba = model.predict_proba(X_test)[:, 1]
-            fpr, tpr, _ = roc_curve(y_test, y_proba)
-            auc = float(row.get("metric_roc_auc") or 0)
-            fig.add_trace(go.Scatter(
-                x=fpr.tolist(), y=tpr.tolist(), mode="lines",
-                name=f"{_run_label(row)} (AUC={auc:.3f})",
-            ))
+            label = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+
+            if data_split in ("test", "both"):
+                X_t, y_t, _ = _reconstruct_test_data(row)
+                fpr, tpr, _ = roc_curve(y_t, model.predict_proba(X_t)[:, 1])
+                auc = float(row.get("metric_roc_auc") or 0)
+                suffix = " (Teste)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=fpr.tolist(), y=tpr.tolist(), mode="lines",
+                    name=f"{label}{suffix} (AUC={auc:.3f})",
+                    line={"color": color},
+                ))
+
+            if data_split in ("train", "both"):
+                X_tr, y_tr, _ = _reconstruct_train_data(row)
+                fpr, tpr, _ = roc_curve(y_tr, model.predict_proba(X_tr)[:, 1])
+                auc = float(row.get("metric_train_roc_auc") or 0)
+                suffix = " (Treino)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=fpr.tolist(), y=tpr.tolist(), mode="lines",
+                    name=f"{label}{suffix} (AUC={auc:.3f})",
+                    line={"dash": "dash", "color": color},
+                ))
         except Exception:
             continue
 
@@ -196,25 +238,48 @@ def plot_roc_curve(runs_data: List[dict]) -> go.Figure:
     return fig
 
 
-def plot_pr_curve(runs_data: List[dict]) -> go.Figure:
-    """Multi-run Precision-Recall curve overlay."""
+def plot_pr_curve(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """Multi-run Precision-Recall curve overlay. data_split: 'test'|'train'|'both'."""
     if not runs_data:
         return _empty_fig("No runs selected")
 
+    from app.plot_config import PALETTE  # noqa: PLC0415
     fig = go.Figure()
-    for row in runs_data:
+    for i, row in enumerate(runs_data):
         if not row.get("run_id"):
             continue
         try:
             model = _get_model(row)
-            X_test, y_test, _ = _reconstruct_test_data(row)
-            y_proba = model.predict_proba(X_test)[:, 1]
-            precision, recall, _ = precision_recall_curve(y_test, y_proba)
-            f1 = float(row.get("metric_f1") or 0)
-            fig.add_trace(go.Scatter(
-                x=recall.tolist(), y=precision.tolist(), mode="lines",
-                name=f"{_run_label(row)} (F1={f1:.3f})",
-            ))
+            label = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+
+            if data_split in ("test", "both"):
+                X_t, y_t, _ = _reconstruct_test_data(row)
+                prec, rec, _ = precision_recall_curve(
+                    y_t, model.predict_proba(X_t)[:, 1]
+                )
+                f1 = float(row.get("metric_f1") or 0)
+                suffix = " (Teste)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=rec.tolist(), y=prec.tolist(), mode="lines",
+                    name=f"{label}{suffix} (F1={f1:.3f})",
+                    line={"color": color},
+                ))
+
+            if data_split in ("train", "both"):
+                X_tr, y_tr, _ = _reconstruct_train_data(row)
+                prec, rec, _ = precision_recall_curve(
+                    y_tr, model.predict_proba(X_tr)[:, 1]
+                )
+                f1 = float(row.get("metric_train_f1") or 0)
+                suffix = " (Treino)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=rec.tolist(), y=prec.tolist(), mode="lines",
+                    name=f"{label}{suffix} (F1={f1:.3f})",
+                    line={"dash": "dash", "color": color},
+                ))
         except Exception:
             continue
 
@@ -230,18 +295,26 @@ def plot_pr_curve(runs_data: List[dict]) -> go.Figure:
     return fig
 
 
-def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
-    """Confusion matrix for the first selected run."""
+def plot_confusion_matrix(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """Confusion matrix for the first selected run. data_split: 'test'|'train'|'both'."""
     valid = [r for r in runs_data if r.get("run_id")]
     if not valid:
         return _empty_fig("No runs selected")
 
     row = valid[0]
+    # "both" falls back to test with an explanatory note
+    effective_split = "test" if data_split == "both" else data_split
     try:
         model = _get_model(row)
-        X_test, y_test, _ = _reconstruct_test_data(row)
-        y_pred = model.predict(X_test)
-        cm = confusion_matrix(y_test, y_pred)
+        if effective_split == "train":
+            X_data, y_data, _ = _reconstruct_train_data(row)
+        else:
+            X_data, y_data, _ = _reconstruct_test_data(row)
+
+        y_pred = model.predict(X_data)
+        cm = confusion_matrix(y_data, y_pred)
         cm_norm = cm.astype(float) / cm.sum(axis=1, keepdims=True)
 
         labels = ["Not Survived (0)", "Survived (1)"]
@@ -250,6 +323,7 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
             for i in range(2)
         ]
 
+        split_label = "Treino" if effective_split == "train" else "Teste"
         fig = go.Figure(go.Heatmap(
             z=cm_norm, x=labels, y=labels,
             text=text, texttemplate="%{text}",
@@ -257,11 +331,20 @@ def plot_confusion_matrix(runs_data: List[dict]) -> go.Figure:
             zmin=0, zmax=1,
         ))
         fig.update_layout(
-            xaxis_title="Predicted",
+            xaxis_title=f"Predicted ({split_label})",
             yaxis_title="Actual",
             margin=_MARGIN,
             **_CLEAN,
         )
+        if data_split == "both":
+            fig.add_annotation(
+                text="Ambos: exibindo apenas dados de Teste",
+                x=0.5, y=-0.18,
+                xref="paper", yref="paper",
+                showarrow=False,
+                font={"size": 11, "color": "#adb5bd"},
+                align="center",
+            )
         return fig
     except Exception as e:
         return _empty_fig(f"Could not load model: {e}")
@@ -273,10 +356,11 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
     if not valid:
         return _empty_fig("No runs selected")
 
+    from app.plot_config import PALETTE  # noqa: PLC0415
     fig = go.Figure()
     any_plotted = False
 
-    for row in valid:
+    for i, row in enumerate(valid):
         try:
             model = _get_model(row)
             clf = model.named_steps["clf"]
@@ -310,6 +394,7 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
                 y=feat_names[idx].tolist(),
                 orientation="h",
                 name=_run_label(row),
+                marker_color=PALETTE[i % len(PALETTE)],
             ))
             any_plotted = True
         except Exception:
@@ -332,33 +417,54 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
     return fig
 
 
-def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
-    """Calibration curve: predicted probability vs actual positive rate."""
+def plot_calibration_curve(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """Calibration curve. data_split: 'test' | 'train' | 'both'."""
     if not runs_data:
         return _empty_fig("No runs selected")
 
+    from app.plot_config import COLOR_REF, PALETTE  # noqa: PLC0415
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=[0, 1], y=[0, 1], mode="lines",
-        line={"dash": "dash", "color": "lightgray", "width": 1},
+        line={"dash": "dash", "color": COLOR_REF, "width": 1},
         name="Perfect calibration", showlegend=True,
     ))
 
-    for row in runs_data:
+    for i, row in enumerate(runs_data):
         if not row.get("run_id"):
             continue
         try:
             model = _get_model(row)
-            X_test, y_test, _ = _reconstruct_test_data(row)
-            y_proba = model.predict_proba(X_test)[:, 1]
-            frac_pos, mean_pred = sk_calibration_curve(
-                y_test, y_proba, n_bins=10
-            )
-            fig.add_trace(go.Scatter(
-                x=mean_pred.tolist(), y=frac_pos.tolist(),
-                mode="lines+markers",
-                name=_run_label(row),
-            ))
+            label = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+
+            if data_split in ("test", "both"):
+                X_t, y_t, _ = _reconstruct_test_data(row)
+                frac, pred = sk_calibration_curve(
+                    y_t, model.predict_proba(X_t)[:, 1], n_bins=10
+                )
+                suffix = " (Teste)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=pred.tolist(), y=frac.tolist(),
+                    mode="lines+markers",
+                    name=f"{label}{suffix}",
+                    line={"color": color},
+                ))
+
+            if data_split in ("train", "both"):
+                X_tr, y_tr, _ = _reconstruct_train_data(row)
+                frac, pred = sk_calibration_curve(
+                    y_tr, model.predict_proba(X_tr)[:, 1], n_bins=10
+                )
+                suffix = " (Treino)" if data_split == "both" else ""
+                fig.add_trace(go.Scatter(
+                    x=pred.tolist(), y=frac.tolist(),
+                    mode="lines+markers",
+                    name=f"{label}{suffix}",
+                    line={"dash": "dash", "color": color},
+                ))
         except Exception:
             continue
 
@@ -374,33 +480,54 @@ def plot_calibration_curve(runs_data: List[dict]) -> go.Figure:
     return fig
 
 
-def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
-    """Box-plot distribution of every metric across all visible runs."""
+def plot_metric_distribution(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """Grouped bar chart of metrics broken by experiment."""
     if not runs_data:
         return _empty_fig("No runs to display")
 
     df = pd.DataFrame(runs_data)
-    metric_cols = [
-        c for c in df.columns
-        if c.startswith("metric_") and "train" not in c
-    ]
+    if data_split == "train":
+        metric_cols = [
+            c for c in df.columns if c.startswith("metric_train_")
+        ]
+    elif data_split == "both":
+        metric_cols = [c for c in df.columns if c.startswith("metric_")]
+    else:  # "test"
+        metric_cols = [
+            c for c in df.columns
+            if c.startswith("metric_") and "train" not in c
+        ]
     if not metric_cols:
         return _empty_fig("No metric columns found")
 
+    from app.plot_config import PALETTE  # noqa: PLC0415
+    display_cols = [
+        col.replace("metric_train_", "Train ")
+           .replace("metric_", "")
+           .replace("_", " ")
+           .title()
+        for col in metric_cols
+    ]
+
     fig = go.Figure()
-    for col in metric_cols:
-        display = col.replace("metric_", "").replace("_", " ").title()
-        values = pd.to_numeric(df[col], errors="coerce").dropna().tolist()
-        fig.add_trace(go.Box(
-            y=values, name=display,
-            boxpoints="all", jitter=0.3, pointpos=-1.5,
+    for i, row in enumerate(runs_data):
+        vals = [float(row.get(c) or 0) for c in metric_cols]
+        fig.add_trace(go.Bar(
+            name=_run_label(row),
+            x=display_cols,
+            y=vals,
+            marker_color=PALETTE[i % len(PALETTE)],
         ))
 
     fig.update_layout(
         yaxis_title="Score",
+        barmode="group",
         xaxis=_NO_GRID,
         yaxis={"range": [0, 1], **_NO_GRID},
-        showlegend=False,
+        showlegend=True,
+        legend=_LEGEND,
         margin=_MARGIN,
         **_CLEAN,
     )
@@ -410,6 +537,7 @@ def plot_metric_distribution(runs_data: List[dict]) -> go.Figure:
 # ── SHAP visualizations ───────────────────────────────────────────────────────
 # Cache: run_id → (shap_values, feat_names, X_t) — instant repeat calls.
 _shap_cache: dict[str, tuple] = {}
+_shap_cache_train: dict[str, tuple] = {}
 
 
 def _shap_available() -> bool:
@@ -418,16 +546,25 @@ def _shap_available() -> bool:
     return importlib.util.find_spec("shap") is not None
 
 
-def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
+def _compute_shap_values(
+    run_id: str,
+    model,
+    X_data: pd.DataFrame,
+    cache: "dict[str, tuple] | None" = None,
+):
     """Compute and cache SHAP values for a single run.
 
     Selects the explainer automatically:
       - TreeExplainer  for tree-based models (Random Forest, XGBoost)
       - LinearExplainer for linear models (Logistic Regression)
     Samples at most 500 rows for performance.
+
+    Pass ``cache=_shap_cache`` for test data,
+    ``cache=_shap_cache_train`` for train data.
     """
-    if run_id in _shap_cache:
-        return _shap_cache[run_id]
+    _cache = _shap_cache if cache is None else cache
+    if run_id in _cache:
+        return _cache[run_id]
 
     try:
         import shap  # noqa: PLC0415
@@ -435,7 +572,7 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
         clf = model.named_steps["clf"]
         preprocessor = model.named_steps["preproc"]
 
-        X_t = preprocessor.transform(X_test)
+        X_t = preprocessor.transform(X_data)
 
         if hasattr(X_t, "toarray"):
             X_t = X_t.toarray()
@@ -464,7 +601,7 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
             sv = sv[1]
 
         result = (np.array(sv), feat_names, X_t)
-        _shap_cache[run_id] = result
+        _cache[run_id] = result
         return result
 
     except ImportError:
@@ -473,8 +610,10 @@ def _compute_shap_values(run_id: str, model, X_test: pd.DataFrame):
         return None, None, None
 
 
-def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
-    """SHAP beeswarm summary (first selected run only)."""
+def plot_shap_summary(
+    runs_data: List[dict], data_split: str = "test"
+) -> go.Figure:
+    """SHAP beeswarm summary (first selected run only). data_split: 'test'|'train'|'both'."""
     if not _shap_available():
         return _empty_fig("SHAP não disponível")
 
@@ -486,8 +625,16 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
     run_id = row["run_id"]
     try:
         model = _get_model(row)
-        X_test, _, _ = _reconstruct_test_data(row)
-        sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
+        # "both" uses test data with a note annotation
+        if data_split == "train":
+            X_data, _, _ = _reconstruct_train_data(row)
+            shap_cache = _shap_cache_train
+        else:
+            X_data, _, _ = _reconstruct_test_data(row)
+            shap_cache = _shap_cache
+        sv, feat_names, X_t = _compute_shap_values(
+            run_id, model, X_data, cache=shap_cache
+        )
 
         if sv is None:
             return _empty_fig("SHAP não disponível para este modelo")
@@ -567,6 +714,15 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
             margin={"l": 130, "r": 20, "t": 15, "b": 40},
             **_CLEAN,
         )
+        if data_split == "both":
+            fig.add_annotation(
+                text="Ambos: SHAP exibe apenas dados de Teste",
+                x=0.5, y=-0.12,
+                xref="paper", yref="paper",
+                showarrow=False,
+                font={"size": 11, "color": "#adb5bd"},
+                align="center",
+            )
         return fig
 
     except Exception as exc:
@@ -576,8 +732,9 @@ def plot_shap_summary(runs_data: List[dict]) -> go.Figure:
 def plot_shap_dependence(
     runs_data: List[dict],
     feature_name: Optional[str],
+    data_split: str = "test",
 ) -> go.Figure:
-    """SHAP dependence plot for one feature on the first selected run."""
+    """SHAP dependence plot for one feature. data_split: 'test'|'train'|'both'."""
     if not _shap_available():
         return _empty_fig("SHAP não disponível")
 
@@ -592,8 +749,16 @@ def plot_shap_dependence(
     run_id = row["run_id"]
     try:
         model = _get_model(row)
-        X_test, _, _ = _reconstruct_test_data(row)
-        sv, feat_names, X_t = _compute_shap_values(run_id, model, X_test)
+        # "both" uses test data with a note annotation
+        if data_split == "train":
+            X_data, _, _ = _reconstruct_train_data(row)
+            shap_cache = _shap_cache_train
+        else:
+            X_data, _, _ = _reconstruct_test_data(row)
+            shap_cache = _shap_cache
+        sv, feat_names, X_t = _compute_shap_values(
+            run_id, model, X_data, cache=shap_cache
+        )
 
         if sv is None:
             return _empty_fig("SHAP não disponível para este modelo")
@@ -641,6 +806,15 @@ def plot_shap_dependence(
             margin=_MARGIN,
             **_CLEAN,
         )
+        if data_split == "both":
+            fig.add_annotation(
+                text="Ambos: SHAP exibe apenas dados de Teste",
+                x=0.5, y=-0.15,
+                xref="paper", yref="paper",
+                showarrow=False,
+                font={"size": 11, "color": "#adb5bd"},
+                align="center",
+            )
         return fig
 
     except Exception as exc:

@@ -497,7 +497,7 @@ def serve_app() -> dash.Dash:
                                                                 [
                                                                     dbc.Tab(label="Teste",         tab_id="tab-test"),
                                                                     dbc.Tab(label="Treino",        tab_id="tab-train"),
-                                                                    dbc.Tab(label="Overfitting ↓", tab_id="tab-overfit"),
+                                                                    dbc.Tab(label="Overfitting", tab_id="tab-overfit"),
                                                                     dbc.Tab(label="Cross-Val",     tab_id="tab-cv"),
                                                                 ],
                                                                 id="runs-table-tabs",
@@ -560,6 +560,19 @@ def serve_app() -> dash.Dash:
                                                             value="radar",
                                                             clearable=False,
                                                             style={"width": "220px", "fontSize": "0.9rem", "flexShrink": "0"},
+                                                        ),
+                                                        dcc.RadioItems(
+                                                            id="chart-data-mode",
+                                                            options=[
+                                                                {"label": "Teste",  "value": "test"},
+                                                                {"label": "Treino", "value": "train"},
+                                                                {"label": "Ambos",  "value": "both"},
+                                                            ],
+                                                            value="test",
+                                                            inline=True,
+                                                            inputStyle={"marginRight": "4px"},
+                                                            labelStyle={"marginRight": "12px", "fontSize": "0.85rem"},
+                                                            style={"flexShrink": "0", "paddingLeft": "10px", "paddingRight": "4px"},
                                                         ),
                                                         html.Div(
                                                             id="chart-info-text",
@@ -1572,6 +1585,7 @@ def serve_app() -> dash.Dash:
         Input("runs-data-store", "data"),
         Input("runs-table", "selected_rows"),
         Input("chart-select-bottom", "value"),
+        Input("chart-data-mode", "value"),
         Input("runs-table-tabs", "active_tab"),
         Input("shap-feature-select", "value"),
     )
@@ -1579,6 +1593,7 @@ def serve_app() -> dash.Dash:
         data,
         selected_rows: List[int],
         chart_select_bottom: str,
+        chart_data_mode: str,
         active_tab: str,
         shap_feature: str,
     ):
@@ -1589,23 +1604,30 @@ def serve_app() -> dash.Dash:
             return px.line_polar()
 
         chart_type = chart_select_bottom or "radar"
-        mode = "train" if active_tab == "tab-train" else "test"
+        # chart_data_mode drives what the plots render (test/train/both).
+        # active_tab still controls which metric columns the TABLE shows.
+        cdm = chart_data_mode or "test"
 
-        # ── Metric column selection (test vs train) ────────────────────────────
-        if mode == "train":
-            internal_metrics = [
-                "metric_train_accuracy", "metric_train_precision",
-                "metric_train_recall", "metric_train_f1", "metric_train_roc_auc",
-            ]
-            display_metrics = [
-                "Train Acc", "Train Prec", "Train Recall", "Train F1", "Train AUC",
-            ]
+        # ── Metric columns for radar / bar_f1 ──────────────────────────────────
+        _test_metrics = [
+            "metric_accuracy", "metric_precision",
+            "metric_recall", "metric_f1", "metric_roc_auc",
+        ]
+        _test_labels = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
+        _train_metrics = [
+            "metric_train_accuracy", "metric_train_precision",
+            "metric_train_recall", "metric_train_f1", "metric_train_roc_auc",
+        ]
+        _train_labels = [
+            "Train Acc", "Train Prec", "Train Recall", "Train F1", "Train AUC",
+        ]
+
+        if cdm == "train":
+            internal_metrics = _train_metrics
+            display_metrics = _train_labels
         else:
-            internal_metrics = [
-                "metric_accuracy", "metric_precision",
-                "metric_recall", "metric_f1", "metric_roc_auc",
-            ]
-            display_metrics = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
+            internal_metrics = _test_metrics
+            display_metrics = _test_labels
 
         # Always require explicit row selection — no automatic fallback.
         if not selected_rows:
@@ -1620,24 +1642,83 @@ def serve_app() -> dash.Dash:
             )
         sel = df.iloc[valid_rows]
 
-        # ── Bar F1 (respects metric-mode) ─────────────────────────────────────
+        # ── Bar F1 ─────────────────────────────────────────────────────────────
         if chart_type == "bar_f1":
-            y_col = (
-                "metric_train_f1" if mode == "train" else "metric_f1"
-            )
+            if cdm == "both":
+                import plotly.graph_objects as go  # noqa: PLC0415
+                from app.plot_config import PALETTE  # noqa: PLC0415
+                fig = go.Figure()
+                for i, (_, r) in enumerate(sel.iterrows()):
+                    run_lbl = (
+                        r.get("run_name") or r.get("run_id") or "Run"
+                    )
+                    color = PALETTE[i % len(PALETTE)]
+                    if "metric_f1" in df.columns:
+                        fig.add_trace(go.Bar(
+                            name=f"{run_lbl} (Teste)",
+                            x=[str(run_lbl)],
+                            y=[float(r.get("metric_f1", 0) or 0)],
+                            marker={"color": color},
+                        ))
+                    if "metric_train_f1" in df.columns:
+                        fig.add_trace(go.Bar(
+                            name=f"{run_lbl} (Treino)",
+                            x=[str(run_lbl)],
+                            y=[float(r.get("metric_train_f1", 0) or 0)],
+                            marker={
+                                "color": color,
+                                "opacity": 0.5,
+                                "pattern": {"shape": "/"},
+                            },
+                        ))
+                fig.update_layout(
+                    barmode="group",
+                    yaxis_title="F1 Score",
+                    legend={
+                        "orientation": "v", "x": 1.02,
+                        "xanchor": "left", "y": 1, "yanchor": "top",
+                    },
+                    margin={"t": 15, "b": 40, "l": 50, "r": 150},
+                    paper_bgcolor="white",
+                    plot_bgcolor="white",
+                    xaxis={"showgrid": False, "zeroline": False},
+                    yaxis={"showgrid": False, "zeroline": False},
+                )
+                return fig
+
+            y_col = "metric_train_f1" if cdm == "train" else "metric_f1"
             if y_col not in df.columns:
                 y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
             if y_col not in df.columns:
                 df[y_col] = 0.0
-            label = "Train F1" if mode == "train" else "F1"
-            fig = px.bar(
-                sel.sort_values(y_col, ascending=False) if y_col in sel.columns else sel,
-                x="run_name" if "run_name" in sel.columns else sel.index,
-                y=y_col,
-                color="model" if "model" in sel.columns else None,
+            import plotly.graph_objects as go  # noqa: PLC0415
+            from app.plot_config import PALETTE  # noqa: PLC0415
+            # build color map keyed by run label (preserves selection order)
+            run_color = {}
+            for j, (_, r) in enumerate(sel.iterrows()):
+                lbl = str(r.get("run_name") or r.get("run_id") or "Run")
+                run_color[lbl] = PALETTE[j % len(PALETTE)]
+            sorted_sel = (
+                sel.sort_values(y_col, ascending=False)
+                if y_col in sel.columns else sel
             )
+            fig = go.Figure()
+            for _, r in sorted_sel.iterrows():
+                lbl = str(r.get("run_name") or r.get("run_id") or "Run")
+                y_val = float(r.get(y_col, 0) or 0)
+                fig.add_trace(go.Bar(
+                    name=lbl,
+                    x=[lbl],
+                    y=[y_val],
+                    marker={"color": run_color.get(lbl, PALETTE[0])},
+                ))
             fig.update_layout(
-                legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+                barmode="group",
+                yaxis_title="F1 Score",
+                legend={
+                    "orientation": "v", "x": 1.02,
+                    "xanchor": "left", "y": 1, "yanchor": "top",
+                },
                 margin={"t": 15, "b": 40, "l": 50, "r": 150},
                 paper_bgcolor="white",
                 plot_bgcolor="white",
@@ -1646,7 +1727,7 @@ def serve_app() -> dash.Dash:
             )
             return fig
 
-        # ── Existing chart types (delegated to app/plots.py) ──────────────────
+        # ── Delegated plots (app/plots.py) ─────────────────────────────────────
         if chart_type in (
             "roc", "pr_curve", "confusion_matrix",
             "feature_importance", "calibration", "metric_dist",
@@ -1656,61 +1737,116 @@ def serve_app() -> dash.Dash:
                 plot_feature_importance, plot_calibration_curve,
                 plot_metric_distribution,
             )
-            # metric_dist: all visible rows; model-heavy plots: selected only
-            runs_records = (
-                df.to_dict("records")
-                if chart_type == "metric_dist"
-                else sel.to_dict("records")
-            )
+            runs_records = sel.to_dict("records")
             if chart_type == "roc":
-                return plot_roc_curve(runs_records)
+                return plot_roc_curve(runs_records, data_split=cdm)
             if chart_type == "pr_curve":
-                return plot_pr_curve(runs_records)
+                return plot_pr_curve(runs_records, data_split=cdm)
             if chart_type == "confusion_matrix":
-                return plot_confusion_matrix(runs_records)
+                return plot_confusion_matrix(runs_records, data_split=cdm)
             if chart_type == "feature_importance":
                 return plot_feature_importance(runs_records)
             if chart_type == "calibration":
-                return plot_calibration_curve(runs_records)
+                return plot_calibration_curve(runs_records, data_split=cdm)
             if chart_type == "metric_dist":
-                return plot_metric_distribution(runs_records)
+                return plot_metric_distribution(runs_records, data_split=cdm)
 
         # ── SHAP chart types ───────────────────────────────────────────────────
         if chart_type in ("shap_summary", "shap_dependence"):
-            from app.plots import plot_shap_summary, plot_shap_dependence  # noqa: PLC0415
+            from app.plots import (  # noqa: PLC0415
+                plot_shap_summary, plot_shap_dependence,
+            )
             runs_records = sel.to_dict("records")
             if chart_type == "shap_summary":
-                return plot_shap_summary(runs_records)
-            return plot_shap_dependence(runs_records, shap_feature)
-
-        # ── Default: radar chart (existing logic — respects metric-mode) ───────
-        available_internal = [m for m in internal_metrics if m in df.columns]
-        available_display = [
-            display_metrics[internal_metrics.index(m)] for m in available_internal
-        ]
-
-        if not available_internal:
-            return px.line_polar()
-
-        fig = px.line_polar()
-        for _, r in sel.iterrows():
-            values = [float(r.get(m, 0) or 0) for m in available_internal]
-            label = r.get("run_name") or r.get("name") or r.get("run_id") or "Run"
-            theta = available_display + [available_display[0]]
-            fig.add_scatterpolar(
-                r=values + [values[0]], theta=theta,
-                name=str(label), fill="toself",
+                return plot_shap_summary(runs_records, data_split=cdm)
+            return plot_shap_dependence(
+                runs_records, shap_feature, data_split=cdm
             )
 
-        suffix = " (Train)" if mode == "train" else ""
+        # ── Default: radar chart ───────────────────────────────────────────────
+        fig = px.line_polar()
+
+        def _hex_rgba(h, a=0.2):  # noqa: E306
+            r, g, b = int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
+            return f"rgba({r},{g},{b},{a})"
+
+        if cdm == "both":
+            from app.plot_config import PALETTE  # noqa: PLC0415
+            avail_test = [m for m in _test_metrics if m in df.columns]
+            avail_train = [m for m in _train_metrics if m in df.columns]
+            disp_test = [
+                _test_labels[_test_metrics.index(m)] for m in avail_test
+            ]
+            disp_train = [
+                _train_labels[_train_metrics.index(m)] for m in avail_train
+            ]
+            for i, (_, r) in enumerate(sel.iterrows()):
+                run_lbl = (
+                    r.get("run_name") or r.get("name")
+                    or r.get("run_id") or "Run"
+                )
+                color = PALETTE[i % len(PALETTE)]
+                if avail_test:
+                    vals = [float(r.get(m, 0) or 0) for m in avail_test]
+                    fig.add_scatterpolar(
+                        r=vals + [vals[0]],
+                        theta=disp_test + [disp_test[0]],
+                        name=f"{run_lbl} (Teste)",
+                        fill="toself",
+                        line={"color": color},
+                        fillcolor=_hex_rgba(color, 0.2),
+                    )
+                if avail_train:
+                    vals = [float(r.get(m, 0) or 0) for m in avail_train]
+                    fig.add_scatterpolar(
+                        r=vals + [vals[0]],
+                        theta=disp_train + [disp_train[0]],
+                        name=f"{run_lbl} (Treino)",
+                        fill="toself",
+                        line={"dash": "dot", "color": color},
+                        fillcolor=_hex_rgba(color, 0.1),
+                    )
+        else:
+            from app.plot_config import PALETTE  # noqa: PLC0415
+            available_internal = [
+                m for m in internal_metrics if m in df.columns
+            ]
+            available_display = [
+                display_metrics[internal_metrics.index(m)]
+                for m in available_internal
+            ]
+            if not available_internal:
+                return px.line_polar()
+            for i, (_, r) in enumerate(sel.iterrows()):
+                values = [
+                    float(r.get(m, 0) or 0) for m in available_internal
+                ]
+                run_lbl = (
+                    r.get("run_name") or r.get("name")
+                    or r.get("run_id") or "Run"
+                )
+                theta = available_display + [available_display[0]]
+                color = PALETTE[i % len(PALETTE)]
+                fig.add_scatterpolar(
+                    r=values + [values[0]], theta=theta,
+                    name=str(run_lbl), fill="toself",
+                    line={"color": color},
+                    fillcolor=_hex_rgba(color),
+                )
+
         fig.update_layout(
             polar=dict(
                 bgcolor="white",
-                radialaxis=dict(visible=True, range=[0, 1], showgrid=False),
+                radialaxis=dict(
+                    visible=False, range=[0, 1], showgrid=False
+                ),
                 angularaxis=dict(showgrid=False),
             ),
             showlegend=True,
-            legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+            legend={
+                "orientation": "v", "x": 1.02,
+                "xanchor": "left", "y": 1, "yanchor": "top",
+            },
             margin={"t": 15, "b": 20, "l": 20, "r": 150},
             paper_bgcolor="white",
         )

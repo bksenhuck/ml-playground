@@ -28,7 +28,8 @@ logger = logging.getLogger(__name__)
 
 def _run(cmd: list[str], description: str) -> bool:
     logger.info("[%s] %s", description, " ".join(cmd))
-    result = subprocess.run(cmd, shell=True)
+    # Using shell=True for complex commands with arguments on Windows
+    result = subprocess.run(" ".join(cmd), shell=True)
     if result.returncode != 0:
         logger.error("[%s] failed (exit %d)", description, result.returncode)
         return False
