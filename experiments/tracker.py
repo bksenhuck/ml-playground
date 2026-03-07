@@ -21,6 +21,7 @@ def run_experiment_and_log(
     class_weight: str = "none",
     poly_features: bool = False,
     cv_folds: int = 0,
+    dataset: str = "titanic"
 ) -> tuple[str, Dict[str, Any]]:
     """Train a model and return ``(run_id, row_dict)`` for the experiment table.
 
@@ -37,6 +38,7 @@ def run_experiment_and_log(
         class_weight=class_weight,
         poly_features=poly_features,
         cv_folds=cv_folds,
+        dataset=dataset
     )
 
     # Cache fitted pipeline for chart use (process-level, cleared on restart)
@@ -47,6 +49,7 @@ def run_experiment_and_log(
     row: Dict[str, Any] = {
         "run_id": run_id,
         "run_name": run_name or run_id[:8],
+        "dataset": dataset,
         "model": model_name,
         "n_features": len(features) if features else 0,
         "features": ",".join(features or []),

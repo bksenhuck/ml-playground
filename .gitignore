@@ -1,5 +1,3 @@
-mlflow.db
-mlruns/
 __pycache__/
 *.py[cod]
 *.pyo
@@ -7,7 +5,15 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-.venv/
-venv/
 venv-ml-playground/
 .DS_Store
+venv-ml/
+models/
+# ML model weight files (never commit these)
+*.safetensors
+*.bin
+*.pt
+*.ckpt
+*.pth
+# Accidental copies
+*copy*.py

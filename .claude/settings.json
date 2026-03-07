@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from app.app import server\")",
+      "Bash(python -c \":*)",
+      "Bash(timeout 10 python -c \":*)",
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(netstat -ano)",
+      "Bash(ss -tlnp)",
+      "Bash(taskkill /F /PID 47944 /PID 44700 /PID 39928 /PID 42748 /PID 35972 /PID 12924 /PID 43800 /PID 38724 /PID 41860)"
+    ]
+  }
+}

@@ -19,6 +19,7 @@ import pandas as pd
 
 from llm.config import load_config
 from llm.fallback_engine import generate_fallback_insight
+from llm.guardrails import check_input
 from llm.prompts import build_experiment_prompt
 
 logger = logging.getLogger(__name__)
@@ -36,19 +37,10 @@ _MAX_RUNS = 5
 def generate_insight(
     question: str, runs_df: pd.DataFrame
 ) -> tuple[str, str]:
-    """Return ``(answer, source)`` where source is ``"llm"`` or ``"local"``.
+    """Return ``(answer, source)`` where source is ``"llm"`` or ``"local"``."""
+    print(f"[LLM] generate_insight called: '{question[:60]}'", flush=True)
+    logger.info("[LLM] generate_insight called: '%s'", question[:60])
 
-    This is the single public entry point called by the Dash callback.
-    It always returns a non-empty answer string.
-
-    Args:
-        question: User's free-text question about their experiments.
-        runs_df:  DataFrame of runs to include as context (already filtered
-                  to selected rows by the callback).
-
-    Returns:
-        Tuple of (insight text in Brazilian Portuguese, source label).
-    """
     # -- Input validation -----------------------------------------------------
     if not question or not question.strip():
         return (
@@ -63,42 +55,62 @@ def generate_insight(
             "local",
         )
 
+    # -- Guardrail pre-filter -------------------------------------------------
+    q = question.strip()
+    
+    # Layer 1: Llama Guard (if available)
+    from llm.llama_guard import moderate
+    is_safe, category = moderate(q)
+    if not is_safe:
+        logger.warning("[LLM] Llama Guard BLOCKED question: category='%s' | q='%s'", category, q[:60])
+        return f"Sua pergunta foi sinalizada como insegura (Categoria: {category}). Por favor, reformule.", "local"
+    
+    # Layer 2: Regex & Topic Filter
+    allowed, refusal = check_input(q)
+    if not allowed:
+        logger.info("[LLM] Regex Guardrail blocked question: '%s'", q[:60])
+        return refusal, "local"
+
+    logger.info("[LLM] All guardrails PASSED for: '%s'", q[:60])
+
     # -- Context trimming -----------------------------------------------------
     keep = [c for c in _CONTEXT_COLS if c in runs_df.columns]
     context_df = runs_df[keep].head(_MAX_RUNS).copy()
-    q = question.strip()
 
-    # -- Cloud path: Gemini ---------------------------------------------------
+    # -- Hybrid Path: Qwen ----------------------------------------------------
     cfg = load_config()
-    if cfg.gemini_ready:
-        logger.info("Using Gemini (%s / %s)", cfg.project_id, cfg.model)
-        response = _try_gemini(cfg, q, context_df)
+    if cfg.llm_ready:
+        print(f"[LLM] USE_LLM=true — Qwen. path={cfg.model_path}", flush=True)
+        logger.info("[LLM] USE_LLM=true — Qwen. path=%s", cfg.model_path)
+        response = _try_qwen(cfg, q, context_df)
         if response:
             return response, "llm"
-        logger.info(
-            "Falling back to local engine (Gemini returned no response)"
-        )
+        print("[LLM] Qwen fell back to local engine", flush=True)
+        logger.warning("[LLM] Qwen returned None — falling back")
     else:
         logger.info(
-            "Falling back to local engine (Gemini not configured — "
-            "set USE_GEMINI=true and GCP_PROJECT_ID to enable)"
+            "[LLM] USE_LLM=false — local engine only "
+            "(set USE_LLM=true to enable Qwen)"
         )
 
     # -- Local fallback: rule-based engine ------------------------------------
     return generate_fallback_insight(q, context_df), "local"
 
 
+
+
 # -- Private helpers ----------------------------------------------------------
 
-def _try_gemini(
+def _try_qwen(
     cfg, question: str, context_df: pd.DataFrame
 ) -> str | None:
-    """Attempt a Gemini call. Returns response text or None on any failure."""
+    """Attempt Qwen 2.5 call. Returns response text or None on failure."""
     try:
-        from llm.client_gemini import GeminiClient  # noqa: PLC0415
-        client = GeminiClient(cfg.project_id, cfg.region, cfg.model)
+        from llm.client_qwen import QwenClient  # noqa: PLC0415
+        # Use cached singleton — avoids reloading the model on every question
+        client = QwenClient.get_or_create(cfg.model_path)
         prompt = build_experiment_prompt(question, context_df)
         return client.generate(prompt)
     except Exception as exc:
-        logger.warning("Gemini call error: %s", exc)
+        logger.warning("[LLM] Qwen client raised an unexpected error: %s", exc)
         return None

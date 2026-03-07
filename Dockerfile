@@ -10,6 +10,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . /app
 
+RUN chmod +x /app/deploy/entrypoint.sh
+
 EXPOSE 8080
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "1", "--timeout", "300", "app.app:server"]
+CMD ["/app/deploy/entrypoint.sh"]

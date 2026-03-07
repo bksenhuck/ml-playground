@@ -1,160 +1,47 @@
-"""UI component helpers for the Dash app (kept small)."""
+"""Reusable UI component helpers for the Dash app."""
 from __future__ import annotations
-
-from typing import Any
 
 import dash_bootstrap_components as dbc
 from dash import html
 
+# Style shared by all circular "?" info badges
+_BADGE_STYLE = {
+    "cursor": "help",
+    "color": "#6c757d",
+    "fontSize": "0.7rem",
+    "border": "1px solid #adb5bd",
+    "borderRadius": "50%",
+    "width": "15px",
+    "height": "15px",
+    "display": "inline-flex",
+    "alignItems": "center",
+    "justifyContent": "center",
+    "marginLeft": "6px",
+    "flexShrink": "0",
+}
 
-def card(title: str, body: Any):
-    return dbc.Card([dbc.CardHeader(title), dbc.CardBody(body)])
-"""Componentes de UI reutilizáveis — barra lateral do ML Playground."""
 
-import dash_bootstrap_components as dbc
-from dash import dcc, html
+def tooltip_icon(tooltip_id: str, text: str, placement: str = "right") -> list:
+    """Return [badge_span, dbc.Tooltip] for a hoverable ❓ info icon."""
+    return [
+        html.Span("?", id=tooltip_id, style=_BADGE_STYLE),
+        dbc.Tooltip(text, target=tooltip_id, placement=placement),
+    ]
 
 
-def sidebar(features: list[str]) -> dbc.Col:
-    """Renderiza a barra lateral de configuração do pipeline.
-
-    Inclui controles para:
-    - Dropdown multi-seleção de variáveis
-    - Toggle de normalização (Nenhuma / StandardScaler)
-    - Seletor de modelo (Regressão Logística / Floresta Aleatória)
-    - Sliders de hiperparâmetros por modelo
-    - Campo de nome da corrida
-    - Botão "Executar Experimento"
-
-    Args:
-        features: Lista de nomes de colunas para popular o dropdown.
-
-    Returns:
-        Um ``dbc.Col`` com todos os controles de configuração.
-    """
-    feature_options = [{"label": f, "value": f} for f in features]
-
-    return dbc.Col(
-        [
-            html.H5("Configuração do Pipeline", className="fw-bold mb-3"),
-
-            # ── Seleção de variáveis ──────────────────────────────────────
-            html.Label("Variáveis", className="form-label fw-semibold"),
-            dcc.Dropdown(
-                id="feature-selector",
-                options=feature_options,
-                value=features,
-                multi=True,
-                placeholder="Selecione variáveis…",
-                className="mb-3",
-            ),
-
-            # ── Normalização ──────────────────────────────────────────────
-            html.Label("Normalização", className="form-label fw-semibold"),
-            dbc.RadioItems(
-                id="scaler-selector",
-                options=[
-                    {"label": "Nenhuma", "value": "none"},
-                    {"label": "StandardScaler", "value": "standard"},
-                ],
-                value="none",
-                className="mb-3",
-            ),
-
-            # ── Modelo ────────────────────────────────────────────────────
-            html.Label("Modelo", className="form-label fw-semibold"),
-            dbc.RadioItems(
-                id="model-selector",
-                options=[
-                    {"label": "Regressão Logística", "value": "logistic_regression"},
-                    {"label": "Floresta Aleatória", "value": "random_forest"},
-                ],
-                value="logistic_regression",
-                className="mb-3",
-            ),
-
-            # ── Hiperparâmetros — Regressão Logística ─────────────────────
-            html.Div(
-                id="lr-params",
-                children=[
-                    html.Label(
-                        "C  (força de regularização)",
-                        className="form-label fw-semibold",
-                    ),
-                    dcc.Slider(
-                        id="lr-C",
-                        min=0.01,
-                        max=10.0,
-                        step=0.01,
-                        value=1.0,
-                        marks={0.01: "0,01", 1: "1", 5: "5", 10: "10"},
-                        tooltip={"placement": "bottom", "always_visible": True},
-                    ),
-                ],
-                className="mb-3",
-            ),
-
-            # ── Hiperparâmetros — Floresta Aleatória ──────────────────────
-            html.Div(
-                id="rf-params",
-                children=[
-                    html.Label(
-                        "n_estimadores",
-                        className="form-label fw-semibold",
-                    ),
-                    dcc.Slider(
-                        id="rf-n-estimators",
-                        min=10,
-                        max=300,
-                        step=10,
-                        value=100,
-                        marks={10: "10", 100: "100", 200: "200", 300: "300"},
-                        tooltip={"placement": "bottom", "always_visible": True},
-                        className="mb-2",
-                    ),
-                    html.Label(
-                        "profundidade máx.  (0 = ilimitada)",
-                        className="form-label fw-semibold mt-2",
-                    ),
-                    dcc.Slider(
-                        id="rf-max-depth",
-                        min=0,
-                        max=20,
-                        step=1,
-                        value=0,
-                        marks={0: "∞", 5: "5", 10: "10", 20: "20"},
-                        tooltip={"placement": "bottom", "always_visible": True},
-                    ),
-                ],
-                className="mb-3",
-                style={"display": "none"},
-            ),
-
-            html.Hr(),
-
-            # ── Nome da corrida ───────────────────────────────────────────
-            html.Label("Nome da corrida  (opcional)", className="form-label fw-semibold"),
-            dbc.Input(
-                id="run-name",
-                placeholder="ex.: rf-ajustado",
-                type="text",
-                size="sm",
-                className="mb-3",
-            ),
-
-            # ── Botão de ação ─────────────────────────────────────────────
-            dbc.Button(
-                "Executar Experimento",
-                id="run-btn",
-                color="primary",
-                className="w-100",
-                n_clicks=0,
-            ),
-
-            # ── Mensagem de status ────────────────────────────────────────
-            html.Div(id="run-status", className="mt-2"),
-        ],
-        width=3,
-        className="p-3 border-end bg-light",
-        style={"minHeight": "calc(100vh - 130px)"},
+def section_header(
+    title: str,
+    tooltip_id: str,
+    tooltip_text: str,
+    placement: str = "right",
+    title_style: dict | None = None,
+) -> html.Div:
+    """Return a d-flex div with a bold title and a hoverable ❓ badge."""
+    style = {"fontWeight": "600", "fontSize": "0.9rem"}
+    if title_style:
+        style.update(title_style)
+    return html.Div(
+        [html.Span(title, style=style)]
+        + tooltip_icon(tooltip_id, tooltip_text, placement),
+        className="d-flex align-items-center",
     )

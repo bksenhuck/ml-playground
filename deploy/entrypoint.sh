@@ -23,5 +23,20 @@ else
     echo "[entrypoint] GCS_MLFLOW_URI not set — using local mlflow.db (if any)"
 fi
 
+# -- Model Weights Sync (Qwen & Llama Guard) ----------------------------------
+if [ -n "$GCS_MODEL_PATH" ]; then
+    QWEN_DIR="/app/models/Qwen2.5-0.5B-Instruct"
+    echo "[entrypoint] Syncing Qwen from $GCS_MODEL_PATH/models/Qwen2.5-0.5B-Instruct ..."
+    mkdir -p "$QWEN_DIR"
+    gsutil -m rsync -r "$GCS_MODEL_PATH/models/Qwen2.5-0.5B-Instruct" "$QWEN_DIR" || echo "[entrypoint] WARNING: Qwen sync failed"
+fi
+
+if [ -n "$GCS_GUARD_PATH" ]; then
+    GUARD_DIR="/app/models/meta-llama/Llama-Guard-3-1B"
+    echo "[entrypoint] Syncing Llama Guard from $GCS_GUARD_PATH ..."
+    mkdir -p "$GUARD_DIR"
+    gsutil -m rsync -r "$GCS_GUARD_PATH" "$GUARD_DIR" || echo "[entrypoint] WARNING: Llama Guard sync failed"
+fi
+
 echo "[entrypoint] Starting Dash app ..."
 exec python -m app.app

@@ -54,6 +54,9 @@ def deploy(image: str) -> bool:
             "--region", settings.GCP_REGION,
             "--platform", "managed",
             "--allow-unauthenticated",
+            "--memory", "4Gi",
+            "--cpu", "1",
+            "--set-env-vars", "LLM_ENGINE=qwen2.5,USE_LLM=true,GCS_MODEL_PATH=gs://{}/models/Qwen2.5-0.5B-Instruct".format(settings.GCP_PROJECT_ID),
         ],
         "DEPLOY",
     )

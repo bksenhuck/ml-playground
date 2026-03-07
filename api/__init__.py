@@ -1,0 +1,1 @@
+"""FastAPI assistant service package."""

@@ -41,19 +41,27 @@ def _get_model(run_row: dict):
 
     features_str = str(run_row.get("features", "") or "")
     features = [f.strip() for f in features_str.split(",") if f.strip()]
-    if not features:
-        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
-
+    
     test_size = float(run_row.get("test_size", 0.2) or 0.2)
     model_name = str(run_row.get("model", "logreg"))
     scaling = str(run_row.get("scaling", "standard"))
     class_weight = str(run_row.get("class_weight", "none"))
     poly_features = bool(run_row.get("poly_features", False))
+    dataset = str(run_row.get("dataset", "titanic"))
+
+    if not features:
+        if dataset == "housing":
+            features = ["MedInc", "HouseAge", "AveRooms", "AveBedrms", "Population", "AveOccup", "Latitude", "Longitude"]
+        else:
+            features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
 
     params: dict = {}
     c = run_row.get("C")
     if c is not None:
         params["C"] = float(c)
+    alpha = run_row.get("alpha")
+    if alpha is not None:
+        params["alpha"] = float(alpha)
     n = run_row.get("n_estimators")
     if n is not None:
         params["n_estimators"] = int(n)
@@ -64,16 +72,26 @@ def _get_model(run_row: dict):
     if lr is not None:
         params["learning_rate"] = float(lr)
 
-    df = sns.load_dataset("titanic").dropna(subset=["survived"])
-    X = df[features].copy()
-    y = df["survived"].astype(int)
+    if dataset == "housing":
+        from sklearn.datasets import fetch_california_housing
+        df = fetch_california_housing(as_frame=True).frame
+        X = df[features].copy()
+        y = df["MedHouseVal"]
+        stratify = None
+    else:
+        df = sns.load_dataset("titanic").dropna(subset=["survived"])
+        X = df[features].copy()
+        y = df["survived"].astype(int)
+        stratify = y
+
     X_train, _, y_train, _ = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
+        X, y, test_size=test_size, random_state=42, stratify=stratify
     )
 
+    task = "regression" if dataset == "housing" else "classification"
     pipeline = build_pipeline(
         features, scaling, model_name, params,
-        class_weight=class_weight, poly_features=poly_features,
+        class_weight=class_weight, poly_features=poly_features, task=task
     )
     pipeline.fit(X_train, y_train)
 
@@ -84,52 +102,56 @@ def _get_model(run_row: dict):
 
 # ── Shared helpers ────────────────────────────────────────────────────────────
 
-def _reconstruct_test_data(run_row: dict):
-    """Recreate (X_test, y_test, feature_list) from params stored in the run row.
+_DEFAULT_FEATURES: dict[str, list[str]] = {
+    "housing": ["MedInc", "HouseAge", "AveRooms", "AveBedrms",
+                "Population", "AveOccup", "Latitude", "Longitude"],
+    "titanic": ["pclass", "sex", "age", "sibsp", "parch", "fare"],
+}
 
-    Must mirror train.py::run_training exactly:
-    - same random_state=42, same stratify=y
-    - no manual imputation (pipeline handles it)
-    """
+
+def _load_dataset_for_row(run_row: dict):
+    """Return (X, y, features, stratify) from a run-row's stored params."""
     features_str = str(run_row.get("features", "") or "")
     features = [f.strip() for f in features_str.split(",") if f.strip()]
+    dataset = str(run_row.get("dataset", "titanic"))
+
     if not features:
-        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
+        features = _DEFAULT_FEATURES.get(dataset, _DEFAULT_FEATURES["titanic"])
 
+    if dataset == "housing":
+        from sklearn.datasets import fetch_california_housing  # noqa: PLC0415
+        df = fetch_california_housing(as_frame=True).frame
+        X, y, stratify = df[features].copy(), df["MedHouseVal"], None
+    else:
+        df = sns.load_dataset("titanic").dropna(subset=["survived"])
+        X = df[features].copy()
+        y = df["survived"].astype(int)
+        stratify = y
+
+    return X, y, features, stratify
+
+
+def _reconstruct_split(run_row: dict, split: str = "test"):
+    """Return (X, y, features) for the requested split ('test' or 'train').
+
+    Mirrors train.py: random_state=42, same stratify, no manual imputation.
+    """
+    X, y, features, stratify = _load_dataset_for_row(run_row)
     test_size = float(run_row.get("test_size", 0.2) or 0.2)
-
-    df = sns.load_dataset("titanic")
-    df = df.dropna(subset=["survived"])
-
-    X = df[features].copy()
-    y = df["survived"].astype(int)
-    _, X_test, _, y_test = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=stratify
     )
+    if split == "train":
+        return X_train, y_train, features
     return X_test, y_test, features
 
 
+def _reconstruct_test_data(run_row: dict):
+    return _reconstruct_split(run_row, "test")
+
+
 def _reconstruct_train_data(run_row: dict):
-    """Mirror of _reconstruct_test_data — returns the train fold.
-
-    Uses identical random_state=42, stratify=y so the split is deterministic.
-    """
-    features_str = str(run_row.get("features", "") or "")
-    features = [f.strip() for f in features_str.split(",") if f.strip()]
-    if not features:
-        features = ["pclass", "sex", "age", "sibsp", "parch", "fare"]
-
-    test_size = float(run_row.get("test_size", 0.2) or 0.2)
-
-    df = sns.load_dataset("titanic")
-    df = df.dropna(subset=["survived"])
-
-    X = df[features].copy()
-    y = df["survived"].astype(int)
-    X_train, _, y_train, _ = train_test_split(
-        X, y, test_size=test_size, random_state=42, stratify=y
-    )
-    return X_train, y_train, features
+    return _reconstruct_split(run_row, "train")
 
 
 def _run_label(row: dict) -> str:
@@ -351,7 +373,7 @@ def plot_confusion_matrix(
 
 
 def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
-    """Feature importance (RF) or |coef| (LogReg) for selected runs."""
+    """Feature importance (RF) or |coef| (LogReg/Ridge) for selected runs."""
     valid = [r for r in runs_data if r.get("run_id")]
     if not valid:
         return _empty_fig("No runs selected")
@@ -372,17 +394,17 @@ def plot_feature_importance(runs_data: List[dict]) -> go.Figure:
                     [_clean_feat_name(n) for n in raw_names]
                 )
             except Exception:
-                n_feats = (
-                    len(clf.feature_importances_)
-                    if hasattr(clf, "feature_importances_")
-                    else len(clf.coef_[0])
-                )
+                n_feats = 0
+                if hasattr(clf, "feature_importances_"):
+                    n_feats = len(clf.feature_importances_)
+                elif hasattr(clf, "coef_"):
+                    n_feats = len(clf.coef_.flatten())
                 feat_names = np.array([f"feat_{i}" for i in range(n_feats)])
 
             if hasattr(clf, "feature_importances_"):
                 importances = clf.feature_importances_
             elif hasattr(clf, "coef_"):
-                importances = np.abs(clf.coef_[0])
+                importances = np.abs(clf.coef_.flatten())
             else:
                 continue
 
@@ -819,3 +841,225 @@ def plot_shap_dependence(
 
     except Exception as exc:
         return _empty_fig(f"Erro ao calcular SHAP: {exc}")
+
+
+def plot_prediction_error(runs_data: List[dict], data_split: str = "test") -> go.Figure:
+    """Regression only: Predicted vs Actual scatter plot."""
+    if not runs_data:
+        return _empty_fig("No runs selected")
+
+    from app.plot_config import PALETTE  # noqa: PLC0415
+    fig = go.Figure()
+
+    all_y = []
+    for i, row in enumerate(runs_data):
+        try:
+            model = _get_model(row)
+            label = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+            
+            if data_split == "train":
+                X_d, y_d, _ = _reconstruct_train_data(row)
+            else:
+                X_d, y_d, _ = _reconstruct_test_data(row)
+                
+            y_pred = model.predict(X_d)
+            all_y.extend(y_d.tolist())
+            all_y.extend(y_pred.tolist())
+
+            fig.add_trace(go.Scatter(
+                x=y_d, y=y_pred,
+                mode="markers",
+                name=label,
+                marker={"color": color, "opacity": 0.5, "size": 5},
+                hovertemplate="Real: %{x}<br>Pred: %{y}<extra></extra>"
+            ))
+        except Exception:
+            continue
+
+    if not all_y:
+        return _empty_fig("Erro ao gerar gráfico de predição")
+
+    # Identity line (45 degrees)
+    mn, mx = min(all_y), max(all_y)
+    fig.add_trace(go.Scatter(
+        x=[mn, mx], y=[mn, mx],
+        mode="lines",
+        line={"color": "black", "dash": "dash", "width": 1},
+        name="Ideal (45°)",
+        showlegend=True
+    ))
+
+    fig.update_layout(
+        xaxis_title="Valor Real (Target)",
+        yaxis_title="Valor Predito",
+        xaxis=_NO_GRID, yaxis=_NO_GRID,
+        margin=_MARGIN,
+        **_CLEAN,
+    )
+    return fig
+
+
+# ── Shared metric config ──────────────────────────────────────────────────────
+
+def _get_metric_config(runs_data: List[dict]) -> dict:
+    """Return metric column names and labels for the given runs.
+
+    Returns a dict with keys:
+      is_regression, m_cols, m_lbls,
+      test_metrics, test_labels, train_metrics, train_labels
+    """
+    is_regression = any(r.get("dataset") == "housing" for r in runs_data)
+    if is_regression:
+        m_cols = ["mae", "rmse", "r2"]
+        m_lbls = ["MAE", "RMSE", "R2"]
+    else:
+        m_cols = ["accuracy", "precision", "recall", "f1", "roc_auc"]
+        m_lbls = ["Accuracy", "Precision", "Recall", "F1", "Roc Auc"]
+    return {
+        "is_regression":  is_regression,
+        "m_cols":         m_cols,
+        "m_lbls":         m_lbls,
+        "test_metrics":   [f"metric_{m}" for m in m_cols],
+        "test_labels":    m_lbls,
+        "train_metrics":  [f"metric_train_{m}" for m in m_cols],
+        "train_labels":   [f"Train {l}" for l in m_lbls],
+    }
+
+
+# ── Bar-F1 chart ──────────────────────────────────────────────────────────────
+
+def plot_bar_f1(runs_data: List[dict], data_split: str = "test") -> go.Figure:
+    """Grouped bar chart of F1 score per run. data_split: 'test'|'train'|'both'."""
+    from app.plot_config import PALETTE  # noqa: PLC0415
+
+    df = pd.DataFrame(runs_data)
+    sel_df = df  # runs_data is already the selected subset
+
+    _layout = dict(
+        barmode="group",
+        yaxis_title="F1 Score",
+        legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+        margin={"t": 15, "b": 40, "l": 50, "r": 150},
+        **_CLEAN,
+        xaxis=_NO_GRID,
+        yaxis=_NO_GRID,
+    )
+
+    fig = go.Figure()
+
+    if data_split == "both":
+        for i, row in enumerate(runs_data):
+            run_lbl = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+            if "metric_f1" in df.columns:
+                fig.add_trace(go.Bar(
+                    name=f"{run_lbl} (Teste)",
+                    x=[str(run_lbl)],
+                    y=[float(row.get("metric_f1", 0) or 0)],
+                    marker={"color": color},
+                ))
+            if "metric_train_f1" in df.columns:
+                fig.add_trace(go.Bar(
+                    name=f"{run_lbl} (Treino)",
+                    x=[str(run_lbl)],
+                    y=[float(row.get("metric_train_f1", 0) or 0)],
+                    marker={"color": color, "opacity": 0.5, "pattern": {"shape": "/"}},
+                ))
+        fig.update_layout(**_layout)
+        return fig
+
+    y_col = "metric_train_f1" if data_split == "train" else "metric_f1"
+    if y_col not in df.columns:
+        y_col = "metric_f1" if "metric_f1" in df.columns else "f1"
+    if y_col not in df.columns:
+        df[y_col] = 0.0
+
+    run_color = {
+        str(r.get("run_name") or r.get("run_id") or "Run"): PALETTE[j % len(PALETTE)]
+        for j, r in enumerate(runs_data)
+    }
+    sorted_runs = (
+        sorted(runs_data, key=lambda r: float(r.get(y_col, 0) or 0), reverse=True)
+        if y_col in df.columns else runs_data
+    )
+    for row in sorted_runs:
+        lbl = str(row.get("run_name") or row.get("run_id") or "Run")
+        fig.add_trace(go.Bar(
+            name=lbl, x=[lbl],
+            y=[float(row.get(y_col, 0) or 0)],
+            marker={"color": run_color.get(lbl, PALETTE[0])},
+        ))
+
+    fig.update_layout(**_layout)
+    return fig
+
+
+# ── Radar chart ───────────────────────────────────────────────────────────────
+
+def plot_radar(runs_data: List[dict], data_split: str = "test") -> go.Figure:
+    """Multi-run radar/spider chart. data_split: 'test'|'train'|'both'."""
+    from app.plot_config import PALETTE, hex_rgba  # noqa: PLC0415
+
+    cfg = _get_metric_config(runs_data)
+    df = pd.DataFrame(runs_data)
+    fig = go.Figure()
+
+    radar_range = None if cfg["is_regression"] else [0, 1]
+
+    if data_split == "both":
+        avail_test  = [m for m in cfg["test_metrics"]  if m in df.columns]
+        avail_train = [m for m in cfg["train_metrics"] if m in df.columns]
+        disp_test  = [cfg["test_labels"] [cfg["test_metrics"] .index(m)] for m in avail_test]
+        disp_train = [cfg["train_labels"][cfg["train_metrics"].index(m)] for m in avail_train]
+
+        for i, row in enumerate(runs_data):
+            run_lbl = _run_label(row)
+            color = PALETTE[i % len(PALETTE)]
+            if avail_test:
+                vals = [float(row.get(m, 0) or 0) for m in avail_test]
+                fig.add_scatterpolar(
+                    r=vals + [vals[0]], theta=disp_test + [disp_test[0]],
+                    name=f"{run_lbl} (Teste)", fill="toself",
+                    line={"color": color}, fillcolor=hex_rgba(color, 0.2),
+                )
+            if avail_train:
+                vals = [float(row.get(m, 0) or 0) for m in avail_train]
+                fig.add_scatterpolar(
+                    r=vals + [vals[0]], theta=disp_train + [disp_train[0]],
+                    name=f"{run_lbl} (Treino)", fill="toself",
+                    line={"dash": "dot", "color": color},
+                    fillcolor=hex_rgba(color, 0.1),
+                )
+    else:
+        internal = cfg["train_metrics"] if data_split == "train" else cfg["test_metrics"]
+        display  = cfg["train_labels"]  if data_split == "train" else cfg["test_labels"]
+        avail    = [m for m in internal if m in df.columns]
+        avail_d  = [display[internal.index(m)] for m in avail]
+        if not avail:
+            return fig
+        for i, row in enumerate(runs_data):
+            vals = [float(row.get(m, 0) or 0) for m in avail]
+            color = PALETTE[i % len(PALETTE)]
+            fig.add_scatterpolar(
+                r=vals + [vals[0]], theta=avail_d + [avail_d[0]],
+                name=str(_run_label(row)), fill="toself",
+                line={"color": color}, fillcolor=hex_rgba(color),
+            )
+
+    fig.update_layout(
+        polar=dict(
+            bgcolor="white",
+            radialaxis=dict(
+                visible=bool(cfg["is_regression"]),
+                range=radar_range,
+                showgrid=False,
+            ),
+            angularaxis=dict(showgrid=False),
+        ),
+        showlegend=True,
+        legend={"orientation": "v", "x": 1.02, "xanchor": "left", "y": 1, "yanchor": "top"},
+        margin={"t": 15, "b": 20, "l": 20, "r": 150},
+        paper_bgcolor="white",
+    )
+    return fig
