@@ -75,6 +75,10 @@ class LlamaGuardClient:
 
     # ── Singleton factory ──────────────────────────────────────────────────
 
+    @property
+    def is_ready(self) -> bool:
+        return self._ready
+
     @classmethod
     def get_or_create(
         cls, model_path: str = _DEFAULT_GUARD_PATH
@@ -104,10 +108,21 @@ class LlamaGuardClient:
             )
             return False
 
+        # Verify torch is importable first (pipeline depends on it)
         try:
-            from transformers import pipeline as hf_pipeline  # noqa: PLC0415
-        except ImportError:
-            logger.error("[LlamaGuard] transformers not installed.")
+            import torch  # noqa: PLC0415
+            print(f"[LlamaGuard] torch {torch.__version__} OK", flush=True)
+        except Exception as exc:
+            import traceback
+            logger.error("[LlamaGuard] torch not importable: %s\n%s", exc, traceback.format_exc())
+            return False
+
+        try:
+            # Use direct submodule import to bypass the lazy-loader in __init__.py
+            from transformers.pipelines import pipeline as hf_pipeline  # noqa: PLC0415
+        except ImportError as exc:
+            import traceback
+            logger.error("[LlamaGuard] transformers.pipeline not importable: %s\n%s", exc, traceback.format_exc())
             return False
 
         try:
@@ -115,8 +130,8 @@ class LlamaGuardClient:
             self._pipe = hf_pipeline(
                 "text-generation",
                 model=self._model_path,
-                dtype="auto",
-                device_map="auto",
+                torch_dtype="auto",
+                device_map={"": "cpu"},
             )
             self._ready = True
             print("[LlamaGuard] Loaded successfully.", flush=True)
@@ -174,6 +189,17 @@ class LlamaGuardClient:
 
 
 # ── Module-level helper ───────────────────────────────────────────────────────
+
+def is_available(model_path: str = _DEFAULT_GUARD_PATH) -> bool:
+    """Return True if the Llama Guard model is already loaded and ready.
+
+    Non-blocking: never triggers a model load.  The background preload thread
+    (in app.py) is the only place that loads the model.  This prevents a
+    concurrent torch import on the request thread while the preload is running.
+    """
+    client = _GUARD_CACHE.get(model_path)
+    return client is not None and client.is_ready
+
 
 def moderate(
     text: str,

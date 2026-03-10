@@ -3,11 +3,13 @@ __pycache__
 *.pyo
 .pytest_cache
 venv
+venv-ml
 venv-ml-playground
 .venv
 env
 .env
 mlruns
+models/
 .git
 .gitignore
 README.md

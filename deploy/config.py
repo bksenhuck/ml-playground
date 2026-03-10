@@ -21,18 +21,25 @@ class DeploySettings:
     GCP_PROJECT_ID: str = os.environ.get("GCP_PROJECT_ID", "")
     GCP_REGION: str = os.environ.get("GCP_REGION", "us-central1")
 
-    # ── Cloud Run ─────────────────────────────────────────────────────────────
-    CLOUDRUN_SERVICE: str = os.environ.get("CLOUDRUN_SERVICE", "ml-playground")
-    # Full image URI, e.g. gcr.io/my-project/ml-playground:latest
-    # Falls back to gcr.io/{GCP_PROJECT_ID}/ml-playground if not set.
+    # ── Cloud Run ────────────────────────────────────────────────────────────
+    CLOUDRUN_SERVICE: str = os.environ.get(
+        "CLOUDRUN_SERVICE", "ml-playground"
+    )
+    # Full image URI — falls back to Artifact Registry if not set.
     GCR_IMAGE: str = os.environ.get("GCR_IMAGE", "")
+
+    # ── GCS model paths ──────────────────────────────────────────────────────
+    GCS_MODEL_PATH: str = os.environ.get("GCS_MODEL_PATH", "")
+    GCS_GUARD_PATH: str = os.environ.get("GCS_GUARD_PATH", "")
+    GCS_MLFLOW_URI: str = os.environ.get("GCS_MLFLOW_URI", "")
 
     @classmethod
     def get_docker_image(cls) -> str:
         if cls.GCR_IMAGE:
             return cls.GCR_IMAGE
         if cls.GCP_PROJECT_ID:
-            return f"{cls.GCP_REGION}-docker.pkg.dev/{cls.GCP_PROJECT_ID}/ml-playground/ml-playground"
+            ar = f"{cls.GCP_REGION}-docker.pkg.dev"
+            return f"{ar}/{cls.GCP_PROJECT_ID}/ml-playground/ml-playground"
         raise ValueError(
             "Set GCR_IMAGE or GCP_PROJECT_ID in your .env"
         )
@@ -40,10 +47,17 @@ class DeploySettings:
     @classmethod
     def validate(cls) -> None:
         """Raise if required deploy vars are missing."""
-        if not cls.GCP_PROJECT_ID:
+        missing = [
+            name for name, val in [
+                ("GCP_PROJECT_ID", cls.GCP_PROJECT_ID),
+                ("GCS_MODEL_PATH", cls.GCS_MODEL_PATH),
+                ("GCS_GUARD_PATH", cls.GCS_GUARD_PATH),
+            ] if not val
+        ]
+        if missing:
             raise EnvironmentError(
-                "Missing required env var: GCP_PROJECT_ID\n"
-                "Add it to your .env file or export it before running."
+                f"Missing required env vars: {', '.join(missing)}\n"
+                "Add them to your .env file or export before running."
             )
 
 

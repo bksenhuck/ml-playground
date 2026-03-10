@@ -224,7 +224,6 @@ def experiments_layout() -> dbc.Container:
                                                     type="circle",
                                                     color="#2980b9",
                                                     style={"transform": "scale(0.5)"},
-                                                    overlay_style={"visibility":"visible", "filter": "blur(1px)"},
                                                 ),
                                                 dcc.Loading(
                                                     dbc.Button(

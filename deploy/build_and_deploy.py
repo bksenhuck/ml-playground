@@ -9,7 +9,8 @@ Usage:
 
 Requirements:
     - gcloud CLI authenticated and project set (no local Docker needed)
-    - .env with GCP_PROJECT_ID (and optionally GCR_IMAGE, CLOUDRUN_SERVICE, GCP_REGION)
+    - .env with GCP_PROJECT_ID (and optionally GCR_IMAGE, CLOUDRUN_SERVICE,
+      GCP_REGION)
 """
 import sys
 import argparse
@@ -38,9 +39,14 @@ def _run(cmd: list[str], description: str) -> bool:
 
 
 def build(image: str) -> bool:
-    """Build and push image using Google Cloud Build (no local Docker needed)."""
+    """Build and push image using Google Cloud Build."""
     return _run(
-        ["gcloud", "builds", "submit", "--tag", image, "."],
+        [
+            "gcloud", "builds", "submit",
+            "--project", settings.GCP_PROJECT_ID,
+            "--tag", image,
+            ".",
+        ],
         "BUILD (Cloud Build)",
     )
 
@@ -50,13 +56,26 @@ def deploy(image: str) -> bool:
     return _run(
         [
             "gcloud", "run", "deploy", settings.CLOUDRUN_SERVICE,
+            "--project", settings.GCP_PROJECT_ID,
             "--image", image,
             "--region", settings.GCP_REGION,
             "--platform", "managed",
             "--allow-unauthenticated",
-            "--memory", "4Gi",
-            "--cpu", "1",
-            "--set-env-vars", "LLM_ENGINE=qwen2.5,USE_LLM=true,GCS_MODEL_PATH=gs://{}/models/Qwen2.5-0.5B-Instruct".format(settings.GCP_PROJECT_ID),
+            "--memory", "8Gi",
+            "--cpu", "4",
+            "--cpu-boost",
+            "--timeout", "300",
+            "--min-instances", "1",
+            "--max-instances", "1",
+            "--concurrency", "5",
+            "--set-env-vars",
+            (
+                "LLM_ENGINE=qwen2.5,USE_LLM=true,"
+                "MODEL_PATH=/app/models/Qwen/Qwen2.5-0.5B-Instruct,"
+                f"GCS_MODEL_PATH={settings.GCS_MODEL_PATH},"
+                "LLAMA_GUARD_PATH=/app/models/meta-llama/Llama-Guard-3-1B,"
+                f"GCS_GUARD_PATH={settings.GCS_GUARD_PATH}"
+            ),
         ],
         "DEPLOY",
     )
@@ -78,7 +97,11 @@ def main() -> None:
 
     logger.info("=== ML PLAYGROUND DEPLOY ===")
     logger.info("Image : %s", image)
-    logger.info("Service: %s  |  Region: %s", settings.CLOUDRUN_SERVICE, settings.GCP_REGION)
+    logger.info(
+        "Service: %s  |  Region: %s",
+        settings.CLOUDRUN_SERVICE,
+        settings.GCP_REGION,
+    )
 
     if not args.deploy_only:
         # gcloud builds submit already builds and pushes

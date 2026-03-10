@@ -70,12 +70,9 @@ class QwenClient:
         # Lazy-import so the app starts normally even without torch
         try:
             from transformers import pipeline as hf_pipeline  # noqa: PLC0415
-        except ImportError:
-            print("[QwenClient] transformers not installed!", flush=True)
-            logger.error(
-                "[QwenClient] 'transformers' not installed. "
-                "Run: pip install transformers torch accelerate"
-            )
+        except ImportError as exc:
+            print(f"[QwenClient] Missing dependency: {exc}", flush=True)
+            logger.error("[QwenClient] Missing dependency: %s", exc)
             return False
 
         try:
@@ -85,8 +82,8 @@ class QwenClient:
             self._pipe = hf_pipeline(
                 "text-generation",
                 model=self._model_path,
-                dtype="auto",
-                device_map="auto",
+                torch_dtype="auto",
+                device_map={"": "cpu"},
             )
             self._model_ready = True
             print("[QwenClient] Qwen 2.5 loaded successfully.", flush=True)

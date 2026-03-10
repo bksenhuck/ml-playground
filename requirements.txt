@@ -10,8 +10,11 @@ gunicorn>=20.1
 # SHAP explainability
 shap>=0.44.0
 # LLM assistant — Local Qwen 2.5
-transformers>=4.40.0
-torch>=2.2.0
+# torch is installed BEFORE this file in the Dockerfile (CPU-only wheel from
+# pytorch.org/whl/cpu).  Do NOT list torch here — pip would upgrade it to the
+# CUDA build from PyPI because local-version suffixes (+cpu) sort lower than
+# plain PyPI versions.  The Dockerfile uses a constraints file to prevent this.
+transformers==4.44.2
 accelerate>=0.29.0
 huggingface_hub>=0.20.0
 google-cloud-storage>=2.14.0

@@ -135,20 +135,25 @@ def register_callbacks(app: dash.Dash) -> None:
         Output("runs-table", "data"),
         Output("runs-table", "columns"),
         Output("runs-table", "style_data_conditional"),
+        Output("runs-table", "selected_rows", allow_duplicate=True),
         Input("runs-table-tabs", "active_tab"),
         Input("runs-data-store", "data"),
+        State("runs-table", "selected_rows"),
+        prevent_initial_call=True,
     )
-    def render_runs_table(active_tab: str, raw_data):
+    def render_runs_table(active_tab: str, raw_data, current_selected):
         data = list(raw_data or [])
+        # Keep only indices still valid after data change
+        preserved = [i for i in (current_selected or []) if i < len(data)]
         if not data:
-            return [], [], []
+            return [], [], [], []
 
         is_regression = any(r.get("dataset") == "housing" for r in data)
         metrics = _REG_METRICS if is_regression else _CLS_METRICS
 
         if active_tab == "tab-train":
             cols = _INFO_COLS + [f"metric_train_{m}" for m in metrics]
-            return data, [_col_def(c) for c in cols], []
+            return data, [_col_def(c) for c in cols], [], preserved
 
         if active_tab == "tab-overfit":
             for row in data:
@@ -167,7 +172,7 @@ def register_callbacks(app: dash.Dash) -> None:
                     {"if": {"filter_query": f"{{{col}}} >= 0.05 && {{{col}}} < 0.15","column_id": col}, **_YELLOW},
                     {"if": {"filter_query": f"{{{col}}} < 0.05",                     "column_id": col}, **_GREEN},
                 ]
-            return data, [_col_def(c) for c in cols], style_cond
+            return data, [_col_def(c) for c in cols], style_cond, preserved
 
         if active_tab == "tab-cv":
             cols = (
@@ -175,7 +180,7 @@ def register_callbacks(app: dash.Dash) -> None:
                 + [f"metric_cv_mean_{m}" for m in metrics]
                 + [f"metric_cv_std_{m}"  for m in metrics]
             )
-            return data, [_col_def(c) for c in cols], []
+            return data, [_col_def(c) for c in cols], [], preserved
 
         # Default: tab-test
         cols = (
@@ -184,7 +189,7 @@ def register_callbacks(app: dash.Dash) -> None:
              "poly_features", "test_size"]
             + [f"metric_{m}" for m in metrics]
         )
-        return data, [_col_def(c) for c in cols], []
+        return data, [_col_def(c) for c in cols], [], preserved
 
     # ── Select-all toggle ─────────────────────────────────────────────────────
     @app.callback(
@@ -530,10 +535,13 @@ def register_callbacks(app: dash.Dash) -> None:
                     className="mb-1",
                     style={"fontSize": "0.82rem"},
                 ),
-                html.Div(
-                    [html.Strong(f"Assistente ({label}): ", style={"color": label_color}), answer],
-                    style={"fontSize": "0.82rem", "whiteSpace": "pre-wrap"},
-                ),
+                html.Div([
+                    html.Strong(f"Assistente ({label}): ", style={"color": label_color}),
+                    dcc.Markdown(
+                        answer,
+                        style={"fontSize": "0.82rem", "display": "inline-block", "width": "100%"},
+                    ),
+                ]),
             ]
             return history + new_exchange, "", False, False
         except Exception as e:
@@ -542,6 +550,28 @@ def register_callbacks(app: dash.Dash) -> None:
                 style={"fontSize": "0.82rem", "color": "red"},
             )
             return history + [error_msg], "", False, False
+
+    # ── Disable input immediately on send (before server responds) ───────────
+    app.clientside_callback(
+        """
+        function(n_clicks, n_submit, value) {
+            var triggered = dash_clientside.callback_context.triggered;
+            if (!triggered || triggered.length === 0) {
+                return [false, false];
+            }
+            if (!value || !value.trim()) {
+                return [false, false];
+            }
+            return [true, true];
+        }
+        """,
+        Output("assistant-input", "disabled", allow_duplicate=True),
+        Output("assistant-send", "disabled", allow_duplicate=True),
+        Input("assistant-send", "n_clicks"),
+        Input("assistant-input", "n_submit"),
+        State("assistant-input", "value"),
+        prevent_initial_call=True,
+    )
 
     # ── Auto-scroll assistant box to the bottom on new message ────────────────
     app.clientside_callback(

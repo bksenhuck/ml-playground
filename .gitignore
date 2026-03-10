@@ -1,3 +1,6 @@
+# Claude Code settings (may contain project IDs / permitted commands)
+.claude/settings.json
+
 __pycache__/
 *.py[cod]
 *.pyo

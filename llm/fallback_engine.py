@@ -1,7 +1,7 @@
 """Rule-based fallback insight engine.
 
 Generates natural-language insights from experiment runs without calling any
-external API. Used whenever Gemini is unavailable or returns an error.
+model. Used whenever Qwen is unavailable or not loaded.
 
 Design principles:
   - Analyse the DataFrame systematically (best runs, averages, config patterns)

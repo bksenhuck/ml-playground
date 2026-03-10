@@ -1,16 +1,18 @@
-"""LLM insight service — hybrid orchestration layer.
+"""LLM insight service — orchestration layer.
 
 Architecture:
   1. Trim runs_df to max 5 rows x relevant columns (context window efficiency).
-  2. If Gemini is enabled and configured -> try GeminiClient.generate().
-     On success -> return the response directly.
-     On failure (network, quota, auth, empty response) -> fall through.
-  3. Always fall back to the local rule-based engine so the assistant
-     returns a useful answer even without any internet access.
+  2. Guardrails pre-filter: Llama Guard (optional) → regex topic filter.
+  3. If USE_LLM=true → try Qwen 2.5 0.5B (local weights, CPU inference).
+     On success → return the response.
+     On failure → fall through to local rule-based engine.
+  4. Local fallback: rule-based engine returns a useful answer without any
+     model loaded.
 
 Logging:
-  - "Using Gemini"              -- cloud path taken
-  - "Falling back to local engine" -- local fallback taken
+  - "All guardrails PASSED"          -- question cleared for LLM
+  - "USE_LLM=true — Qwen"            -- Qwen path taken
+  - "Qwen fell back to local engine" -- local fallback taken
 """
 from __future__ import annotations
 
@@ -57,14 +59,26 @@ def generate_insight(
 
     # -- Guardrail pre-filter -------------------------------------------------
     q = question.strip()
-    
-    # Layer 1: Llama Guard (if available)
-    from llm.llama_guard import moderate
-    is_safe, category = moderate(q)
-    if not is_safe:
-        logger.warning("[LLM] Llama Guard BLOCKED question: category='%s' | q='%s'", category, q[:60])
-        return f"Sua pergunta foi sinalizada como insegura (Categoria: {category}). Por favor, reformule.", "local"
-    
+
+    # Layer 1: Llama Guard (optional).  If not yet loaded, skip it and rely on
+    # the regex layer below — the LLM still runs.  Blocking on LlamaGuard made
+    # the assistant permanently unusable because loading takes 15+ min on CPU.
+    from llm.llama_guard import is_available, moderate
+    if is_available():
+        is_safe, category = moderate(q)
+        if not is_safe:
+            logger.warning(
+                "[LLM] Llama Guard BLOCKED: category='%s' | q='%s'",
+                category, q[:60],
+            )
+            return (
+                f"Sua pergunta foi sinalizada como insegura "
+                f"(Categoria: {category}). Por favor, reformule.",
+                "local",
+            )
+    else:
+        logger.info("[LLM] Llama Guard not yet loaded — using regex guardrails only.")
+
     # Layer 2: Regex & Topic Filter
     allowed, refusal = check_input(q)
     if not allowed:

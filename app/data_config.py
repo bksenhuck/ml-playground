@@ -5,7 +5,6 @@ Loaded once at import time so every module references the same objects.
 from __future__ import annotations
 
 import seaborn as sns
-from sklearn.datasets import fetch_california_housing
 
 # ── Titanic ───────────────────────────────────────────────────────────────────
 _titanic_df = sns.load_dataset("titanic")
@@ -21,7 +20,12 @@ TITANIC_DEFAULT: list[str] = [
 TITANIC_REDUNDANT = {"alive", "class", "who", "adult_male", "embark_town", "alone"}
 
 # ── California Housing ────────────────────────────────────────────────────────
-_housing_data = fetch_california_housing()
-HOUSING_FEATURES: list[str] = list(_housing_data.feature_names)
+# Feature names are stable across sklearn versions — hardcoded to avoid a
+# network fetch at import time (sklearn downloads from figshare on first use).
+# The actual dataset is fetched lazily in plots.py and the ML runner.
+HOUSING_FEATURES: list[str] = [
+    "MedInc", "HouseAge", "AveRooms", "AveBedrms",
+    "Population", "AveOccup", "Latitude", "Longitude",
+]
 HOUSING_OPTS: list[dict] = [{"label": f, "value": f} for f in HOUSING_FEATURES]
 HOUSING_DEFAULT: list[str] = HOUSING_FEATURES
